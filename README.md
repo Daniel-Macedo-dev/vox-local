@@ -120,6 +120,26 @@ python src/main.py
 
 ---
 
+## Running Tests
+
+The test suite covers pure logic and critical runtime rules without requiring hardware, Ollama, Whisper, or Piper.
+
+```bash
+# From the vox-local/ directory:
+python -m pytest tests/ -v
+```
+
+A quick sanity-compile pass before testing:
+
+```bash
+python -m compileall src
+python -m pytest tests/ -v
+```
+
+Tests live in `tests/` and are discovered automatically by pytest. No extra configuration is needed — `tests/conftest.py` stubs all hardware and GUI dependencies so the suite runs in any environment.
+
+---
+
 ## Usage
 
 ### Interface overview

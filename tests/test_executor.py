@@ -398,3 +398,75 @@ class TestCloseAppAlias:
 
         args = mock_run.call_args[0][0]
         assert "notepad.exe" in args
+
+
+# ---------------------------------------------------------------------------
+# run() error paths — TypeError and generic Exception
+# ---------------------------------------------------------------------------
+
+class TestRunErrorPaths:
+    def test_unexpected_kwarg_returns_invalid_params_message(self, tmp_path):
+        """Passing an unrecognised keyword argument causes a TypeError inside the
+        handler.  run() must catch it and return a user-facing error string."""
+        cfg = _make_config(tmp_path)
+        ex = Executor(cfg)
+        # show_time() takes no parameters — any kwarg causes TypeError.
+        result = ex.run("show_time", {"unexpected": "value"})
+        assert "inválido" in result.lower() or "invalid" in result.lower() or "parâmetro" in result.lower()
+        assert "show_time" in result
+
+    def test_generic_exception_from_handler_returns_error_message(self, tmp_path):
+        """If a handler raises a non-TypeError exception, run() must catch it
+        and return a structured error string — never propagate to the caller."""
+        cfg = _make_config(tmp_path)
+        ex = Executor(cfg)
+        ex._action_map["show_time"] = MagicMock(side_effect=RuntimeError("disk full"))
+        result = ex.run("show_time", {})
+        assert "erro" in result.lower() or "error" in result.lower()
+        assert "show_time" in result
+
+
+# ---------------------------------------------------------------------------
+# open_url
+# ---------------------------------------------------------------------------
+
+class TestOpenUrl:
+    def test_open_url_calls_webbrowser_and_returns_confirmation(self, tmp_path):
+        """_open_url must call webbrowser.open with the exact URL and return
+        a string that includes the URL."""
+        cfg = _make_config(tmp_path)
+        ex = Executor(cfg)
+        with patch("webbrowser.open") as mock_open:
+            result = ex._open_url("https://example.com")
+        mock_open.assert_called_once_with("https://example.com")
+        assert "https://example.com" in result
+
+    def test_open_url_via_run_dispatches_correctly(self, tmp_path):
+        """open_url must be reachable through the normal run() dispatch path."""
+        cfg = _make_config(tmp_path, {"allowed_actions": ["open_url"]})
+        ex = Executor(cfg)
+        with patch("webbrowser.open"):
+            result = ex.run("open_url", {"url": "https://example.com"})
+        assert "https://example.com" in result
+
+
+# ---------------------------------------------------------------------------
+# search_file — result count cap
+# ---------------------------------------------------------------------------
+
+class TestSearchFileResultCap:
+    def test_search_file_caps_at_three_results(self, tmp_path):
+        """search_file must never return more than 3 file names even when the
+        directory contains more matching files."""
+        for i in range(5):
+            (tmp_path / f"report_{i}.txt").write_text("dummy")
+
+        cfg = _make_config(tmp_path, {"search_dirs": [str(tmp_path)]})
+        ex = Executor(cfg)
+        result = ex._search_file("report")
+
+        assert "Encontrei" in result
+        # The result is "Encontrei: name1, name2, name3" — split on ", "
+        names_part = result.replace("Encontrei: ", "")
+        names = names_part.split(", ")
+        assert len(names) <= 3

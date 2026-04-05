@@ -254,6 +254,14 @@ class TestEstimateNoiseFloor:
         audio = np.ones(1024, dtype=np.float32) * 0.05
         assert isinstance(estimate_noise_floor(audio), float)
 
+    def test_sub_frame_audio_falls_back_to_compute_rms(self):
+        """Audio shorter than one frame (< 512 samples) can't be split into frames.
+        The function must fall back to compute_rms rather than returning 0.0."""
+        audio = np.full(100, 0.07, dtype=np.float32)
+        result = estimate_noise_floor(audio)
+        assert math.isclose(result, compute_rms(audio), rel_tol=1e-5)
+        assert result > 0.0  # must not silently return zero
+
 
 # ── estimate_speech_rms ────────────────────────────────────────────────────────
 
@@ -275,6 +283,14 @@ class TestEstimateSpeechRms:
 
     def test_none_returns_zero(self):
         assert estimate_speech_rms(None, 0.01) == 0.0
+
+    def test_sub_frame_audio_falls_back_to_overall_rms(self):
+        """Audio shorter than one frame (< 512 samples) hits the same `if not frames`
+        guard as estimate_noise_floor — must return compute_rms, not zero."""
+        audio = np.full(200, 0.04, dtype=np.float32)
+        result = estimate_speech_rms(audio, noise_floor=0.01)
+        assert math.isclose(result, compute_rms(audio), rel_tol=1e-5)
+        assert result > 0.0
 
 
 # ── suggest_silence_threshold ─────────────────────────────────────────────────
@@ -327,6 +343,19 @@ class TestSignalQualityLabel:
         label, _ = signal_quality_label(noise_floor=0.0, speech_rms=0.05)
         # SNR is infinite when noise_floor=0 — should be "good"
         assert label == "good"
+
+    def test_no_signal_at_exact_boundary(self):
+        """speech_rms exactly at the 0.001 threshold must return 'no_signal'
+        (condition is <= 0.001, so the boundary belongs to no_signal)."""
+        label, _ = signal_quality_label(noise_floor=0.005, speech_rms=0.001)
+        assert label == "no_signal"
+
+    def test_high_snr_with_elevated_floor_returns_fair(self):
+        """SNR >= 6.0 does NOT guarantee 'good' when noise_floor >= 0.01.
+        The 'good' path requires BOTH snr >= 6.0 AND noise_floor < 0.01."""
+        # noise_floor=0.012 (>= 0.01), snr = 0.10/0.012 ≈ 8.3 (>= 6.0)
+        label, _ = signal_quality_label(noise_floor=0.012, speech_rms=0.10)
+        assert label == "fair"
 
 
 # ── compute_clipping_fraction ─────────────────────────────────────────────────
@@ -410,6 +439,20 @@ class TestUpdateNoiseFloorGated:
         # threshold = 0.01 * 1.2 = 0.012 < 0.015 → gate closed
         result = update_noise_floor_gated(0.01, 0.015, alpha=0.98, gate_factor=1.2)
         assert result == 0.01
+
+    def test_gate_stays_open_when_rms_below_absolute_minimum(self):
+        """The gate condition requires new_rms > 0.01 in addition to exceeding
+        the gate factor.  When new_rms <= 0.01 the gate stays open even if
+        new_rms > current * gate_factor, preventing quiet ambient noise from
+        freezing the floor at startup before it has converged."""
+        # current=0.004, gate_factor=2.0 → gate_factor threshold = 0.008
+        # new_rms=0.009 > 0.008 satisfies the factor condition, but 0.009 <= 0.01
+        # → third condition fails → floor must still update
+        current = 0.004
+        result = update_noise_floor_gated(current, 0.009, alpha=0.98, gate_factor=2.0)
+        expected = 0.98 * current + 0.02 * 0.009
+        assert math.isclose(result, expected, rel_tol=1e-6)
+        assert result != current  # floor moved
 
     def test_has_sufficient_energy_uses_reduced_margin(self):
         """Default speech_margin is now 2.5 (was 3.5) — more tolerant."""
@@ -500,3 +543,21 @@ class TestClassifyCaptureIssue:
             noise_floor=0.03, speech_rms=0.04, clip_frac=0.10, silence_threshold=0.02
         )
         assert result["issue"] == "clipping"
+
+    def test_zero_noise_floor_returns_ok_for_clean_speech(self):
+        """When noise_floor=0.0 the SNR is infinite; threshold checks are also
+        skipped (noise_floor > 0.001 guard fails).  The result must be 'ok'."""
+        result = classify_capture_issue(
+            noise_floor=0.0, speech_rms=0.05, clip_frac=0.0, silence_threshold=0.01
+        )
+        assert result["issue"] == "ok"
+        assert result["severity"] == "ok"
+
+    def test_clipping_percentage_in_detail(self):
+        """The 'clipping' detail message must include the clipped percentage
+        so the user can see the severity at a glance."""
+        result = classify_capture_issue(
+            noise_floor=0.01, speech_rms=0.3, clip_frac=0.15, silence_threshold=0.02
+        )
+        assert result["issue"] == "clipping"
+        assert "15.0%" in result["detail"]
