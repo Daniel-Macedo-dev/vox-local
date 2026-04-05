@@ -11,6 +11,8 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSlot
 from PyQt6.QtGui import QColor, QPainter
 
+from ui import theme
+
 
 class MicLevelBar(QWidget):
     """Horizontal RMS level bar — green / amber / red."""
@@ -124,7 +126,11 @@ class MicLevelWaveform(QWidget):
             y = cy - h / 2
             denom = (n - 1) / 2 if n > 1 else 1
             edge  = 1.0 - abs(i - (n - 1) / 2) / denom
-            alpha = int(70 + 160 * edge)
+            # Active: expressive purple peaks. Inactive: near-invisible ghost bars.
+            if self._active:
+                alpha = int(55 + 185 * edge)
+            else:
+                alpha = int(14 + 34 * edge)
             p.setBrush(QColor(168, 85, 247, alpha))
             p.drawRoundedRect(QRectF(x, y, self.BAR_W, h), 1.5, 1.5)
         p.end()

@@ -3,42 +3,44 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QColor, QPainter, QGuiApplication
 
 from ui.mic_meter import MicLevelWaveform
+from ui import theme
 
 
 # ─── Stylesheet constants ──────────────────────────────────────────────────────
 
 _BG          = "background: transparent; border: none;"
-_FONT_STACK  = "font-family: 'Segoe UI', 'Inter', 'Helvetica Neue', sans-serif;"
+_FONT_STACK  = f"font-family: {theme.FONT};"
 
+# Section micro-labels (YOU / VOX) — left-accent border approach
 _MUTED_LABEL = (
-    f"color: rgba(195,185,230,0.72); font-size: 9px; letter-spacing: 1.8px; "
+    f"color: rgba(210,200,240,0.78); font-size: 9px; letter-spacing: 1.8px; "
     f"font-weight: 700; {_FONT_STACK} "
     "border-top: none; border-right: none; border-bottom: none; "
-    "border-left: 2px solid rgba(168,85,247,60); "
+    "border-left: 2px solid rgba(168,85,247,80); "
     "padding-left: 8px; background: transparent;"
 )
 
 _CONTAINER_SS = """
 QFrame#container {
-    background-color: rgba(8, 6, 16, 250);
-    border-radius: 18px;
-    border: 1px solid rgba(168, 85, 247, 90);
+    background-color: rgba(10, 8, 22, 252);
+    border-radius: 16px;
+    border: 1px solid rgba(168, 85, 247, 115);
 }
 """
 
 _BADGE_SS = (
-    "background: rgba(168,85,247,22);"
-    "border: 1px solid rgba(168,85,247,105);"
+    "background: rgba(168,85,247,28);"
+    "border: 1px solid rgba(168,85,247,120);"
     "border-radius: 5px;"
-    "color: rgba(185,110,255,215);"
+    "color: rgba(192,140,255,230);"
     "font-size: 9px;"
     "font-weight: 700;"
-    "letter-spacing: 1.4px;"
-    "padding: 2px 8px;"
+    "letter-spacing: 1.5px;"
+    "padding: 2px 9px;"
 )
 
 _FOOTER_SS = (
-    f"color: rgba(155,148,185,0.72); font-size: 10px; "
+    f"color: rgba(160,153,195,0.75); font-size: 10px; "
     f"letter-spacing: 0.3px; {_FONT_STACK} {_BG}"
 )
 
@@ -61,18 +63,18 @@ class ClickableLabel(QLabel):
 class OverlayWindow(QWidget):
     language_clicked = pyqtSignal()
 
-    # Human-readable status labels and their colours
+    # Human-readable status labels and their colours (sourced from shared theme)
     _STATUS_MAP = {
-        "idle":         ("idle",          "rgba(100,95,130,0.7)"),
-        "monitoring":   ("monitoring",    "#22c55e"),
-        "listening":    ("listening",     "#3b82f6"),
-        "transcribing": ("transcribing",  "#f59e0b"),
-        "generating":   ("generating",    "#a855f7"),
-        "responding":   ("responding",    "#a855f7"),
-        "speaking":     ("speaking",      "#a855f7"),
-        "error":        ("error",         "#f87171"),
-        "cancelled":    ("cancelled",     "#f87171"),
-        "done":         ("done",          "#22c55e"),
+        "idle":         ("idle",          "rgba(108,103,140,0.72)"),
+        "monitoring":   ("monitoring",    theme.SUCCESS),
+        "listening":    ("listening",     theme.LISTENING),
+        "transcribing": ("transcribing",  theme.WARNING),
+        "generating":   ("generating",    theme.ACTIVE),
+        "responding":   ("responding",    theme.ACTIVE),
+        "speaking":     ("speaking",      theme.ACTIVE),
+        "error":        ("error",         theme.ERROR),
+        "cancelled":    ("cancelled",     theme.ERROR),
+        "done":         ("done",          theme.SUCCESS),
     }
 
     def __init__(self):
@@ -125,26 +127,26 @@ class OverlayWindow(QWidget):
 
         self._title = QLabel("VOX")
         self._title.setStyleSheet(
-            f"color: rgba(255,255,255,0.88); font-size: 11px; "
-            f"letter-spacing: 4px; font-weight: 600; {_FONT_STACK} {_BG}"
+            f"color: rgba(255,255,255,0.90); font-size: 11px; "
+            f"letter-spacing: 4.5px; font-weight: 700; {_FONT_STACK} {_BG}"
         )
 
-        # Ollama status dot — small, right of title
+        # Ollama connectivity dot — right of title
         self._ollama_dot = QLabel("●")
         self._ollama_dot.setStyleSheet(
-            f"color: rgba(80,80,80,0.8); font-size: 8px; {_FONT_STACK} {_BG}"
+            f"color: rgba(80,80,80,0.75); font-size: 9px; {_FONT_STACK} {_BG}"
         )
         self._ollama_dot.setToolTip("Checking Ollama…")
 
         self._dot = QLabel("●")
         self._dot.setStyleSheet(
-            f"color: rgba(100,95,130,0.7); font-size: 10px; {_FONT_STACK} {_BG}"
+            f"color: rgba(108,103,140,0.72); font-size: 11px; {_FONT_STACK} {_BG}"
         )
 
         self._status_lbl = QLabel("idle")
         self._status_lbl.setStyleSheet(
-            f"color: rgba(100,95,130,0.7); font-size: 11px; "
-            f"font-weight: 600; letter-spacing: 0.5px; {_FONT_STACK} {_BG}"
+            f"color: rgba(108,103,140,0.72); font-size: 12px; "
+            f"font-weight: 600; letter-spacing: 0.4px; {_FONT_STACK} {_BG}"
         )
 
         status_row = QHBoxLayout()
@@ -196,7 +198,7 @@ class OverlayWindow(QWidget):
         self._transcript.setWordWrap(True)
         self._transcript.setMaximumHeight(48)
         self._transcript.setStyleSheet(
-            f"color: rgba(235,232,248,0.4); font-size: 14px; "
+            f"color: rgba(235,232,248,0.30); font-size: 14px; "
             f"line-height: 1.4; {_FONT_STACK} {_BG}"
         )
         root.addWidget(self._transcript)
@@ -227,7 +229,8 @@ class OverlayWindow(QWidget):
         self._response.setWordWrap(True)
         self._response.setMaximumHeight(64)
         self._response.setStyleSheet(
-            f"color: #a855f7; font-size: 13px; line-height: 1.45; {_FONT_STACK} {_BG}"
+            f"color: {theme.ACCENT_SOFT}; font-size: 13px; line-height: 1.45; "
+            f"{_FONT_STACK} {_BG}"
         )
         root.addWidget(self._response)
 
@@ -268,8 +271,8 @@ class OverlayWindow(QWidget):
         self._apply_dot(color)
         self._status_lbl.setText(text)
         self._status_lbl.setStyleSheet(
-            f"color: {color}; font-size: 11px; font-weight: 600; "
-            f"letter-spacing: 0.5px; {_FONT_STACK} {_BG}"
+            f"color: {color}; font-size: 12px; font-weight: 600; "
+            f"letter-spacing: 0.4px; {_FONT_STACK} {_BG}"
         )
 
     def _tick_pulse(self):
@@ -322,7 +325,7 @@ class OverlayWindow(QWidget):
     @pyqtSlot()
     def set_cancelled(self):
         self._state = "idle"
-        self._set_status("cancelled", "#f87171")
+        self._set_status("cancelled", theme.ERROR)
         self._waveform.set_active(False)
         self._response.setText("")
         self._footer.setVisible(False)
@@ -341,7 +344,7 @@ class OverlayWindow(QWidget):
     @pyqtSlot()
     def set_monitoring(self):
         self._state = "monitoring"
-        self._set_status("monitoring", "#22c55e")
+        self._set_status("monitoring", theme.SUCCESS)
         self._waveform.set_active(False)
         self._footer.setText(self._footer_default)
         self._footer.setStyleSheet(_FOOTER_SS)
@@ -352,14 +355,14 @@ class OverlayWindow(QWidget):
     @pyqtSlot()
     def set_listening(self):
         self._state = "listening"
-        self._set_status("listening", "#3b82f6", pulse=True, dim="rgba(59,130,246,0.22)")
+        self._set_status("listening", theme.LISTENING, pulse=True, dim="rgba(59,130,246,0.22)")
         self._transcript.setText("…")
         self._transcript.setStyleSheet(
             f"color: rgba(235,232,248,0.38); font-size: 14px; {_FONT_STACK} {_BG}"
         )
         self._response.setText("")
         self._response.setStyleSheet(
-            f"color: #a855f7; font-size: 13px; {_FONT_STACK} {_BG}"
+            f"color: {theme.ACCENT_SOFT}; font-size: 13px; {_FONT_STACK} {_BG}"
         )
         self._waveform.set_active(True)
         self._footer.setVisible(False)
@@ -370,23 +373,23 @@ class OverlayWindow(QWidget):
     def set_processing(self):
         """Listening stopped — transcribing audio."""
         self._state = "transcribing"
-        self._set_status("transcribing…", "#f59e0b")
+        self._set_status("transcribing…", theme.WARNING)
         self._waveform.set_active(False)
         self._response.setText("")
         self._response.setStyleSheet(
-            f"color: #a855f7; font-size: 13px; {_FONT_STACK} {_BG}"
+            f"color: {theme.ACCENT_SOFT}; font-size: 13px; {_FONT_STACK} {_BG}"
         )
         self._footer.setVisible(False)
 
     @pyqtSlot()
     def set_generating(self):
         self._state = "generating"
-        self._set_status("generating", "#a855f7")
+        self._set_status("generating", theme.ACTIVE)
 
     @pyqtSlot()
     def set_speaking(self):
         self._state = "speaking"
-        self._set_status("speaking", "#a855f7", pulse=True, dim="rgba(168,85,247,0.22)")
+        self._set_status("speaking", theme.ACTIVE, pulse=True, dim="rgba(168,85,247,0.22)")
 
     @pyqtSlot(str)
     def set_transcript(self, text: str):
@@ -399,7 +402,7 @@ class OverlayWindow(QWidget):
     def append_token(self, token: str):
         if self._state != "responding":
             self._state = "responding"
-            self._set_status("responding", "#a855f7")
+            self._set_status("responding", theme.ACTIVE)
             self._footer.setVisible(False)
         current = self._response.text()
         if len(current) < 300:
@@ -412,9 +415,9 @@ class OverlayWindow(QWidget):
         self._state = "responding"
         self._response.setText(text)
         self._response.setStyleSheet(
-            f"color: #a855f7; font-size: 13px; line-height: 1.45; {_FONT_STACK} {_BG}"
+            f"color: {theme.ACCENT_SOFT}; font-size: 13px; line-height: 1.45; {_FONT_STACK} {_BG}"
         )
-        self._set_status("responding", "#a855f7")
+        self._set_status("responding", theme.ACTIVE)
         self._footer.setVisible(False)
 
     @pyqtSlot(str)
@@ -422,14 +425,14 @@ class OverlayWindow(QWidget):
         self._state = "responding"
         self._response.setText(text)
         self._response.setStyleSheet(
-            f"color: #22c55e; font-size: 13px; line-height: 1.45; {_FONT_STACK} {_BG}"
+            f"color: {theme.SUCCESS}; font-size: 13px; line-height: 1.45; {_FONT_STACK} {_BG}"
         )
-        self._set_status("done", "#22c55e")
+        self._set_status("done", theme.SUCCESS)
         self._footer.setVisible(False)
 
     @pyqtSlot(bool)
     def set_ollama_ok(self, ok: bool):
-        color   = "#22c55e" if ok else "#f87171"
+        color   = theme.SUCCESS if ok else theme.ERROR
         tooltip = "Ollama connected" if ok else "Ollama disconnected"
         self._ollama_dot.setStyleSheet(
             f"color: {color}; font-size: 8px; {_FONT_STACK} {_BG}"
