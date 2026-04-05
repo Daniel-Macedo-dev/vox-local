@@ -166,6 +166,8 @@ class TestBrainProcess:
         assert assistant_entries[0]["content"].startswith("[action:")
 
     def test_max_history_respected(self, tmp_path):
+        """max_history=4 means 4 turns; each turn is 2 raw messages (user+assistant).
+        After 5 turns the oldest is trimmed, leaving exactly 4 turns = 8 raw entries."""
         cfg = _make_config(tmp_path, {"max_history": 4})
         ex = Executor(cfg)
         brain = Brain(cfg, ex)
@@ -175,7 +177,85 @@ class TestBrainProcess:
             with patch("requests.post", return_value=mock_resp):
                 brain.process(f"message {i}")
 
-        assert len(brain.history) <= 4
+        # 4 turns × 2 messages = 8 raw entries, not 4.
+        assert len(brain.history) == 4 * 2
+        # The oldest turn (message 0) must have been dropped.
+        assert brain.history[0]["content"] == "message 1"
+
+    def test_history_pairs_intact_after_trim(self, tmp_path):
+        """After trimming, history must be properly paired (no orphaned user entries).
+        This guards against off-by-one errors in the trimming slice."""
+        cfg = _make_config(tmp_path, {"max_history": 3})
+        ex = Executor(cfg)
+        brain = Brain(cfg, ex)
+
+        for i in range(7):
+            mock_resp = _mock_stream_response(f"ok {i}")
+            with patch("requests.post", return_value=mock_resp):
+                brain.process(f"q {i}")
+
+        # History must always start with a user entry and alternate user/assistant.
+        assert brain.history[0]["role"] == "user"
+        for j in range(0, len(brain.history), 2):
+            assert brain.history[j]["role"] == "user"
+            assert brain.history[j + 1]["role"] == "assistant"
+
+    def test_timeout_rolls_back_history(self, tmp_path):
+        """A Timeout exception must not leave a dangling user entry in history."""
+        import requests as req
+        brain = _make_brain(tmp_path)
+        pre = list(brain.history)
+        with patch("requests.post", side_effect=req.exceptions.Timeout):
+            text, is_action = brain.process("hello")
+        assert is_action is False
+        assert "timed out" in text.lower() or "timeout" in text.lower() or "overloaded" in text.lower()
+        assert brain.history == pre
+
+    def test_generic_exception_rolls_back_history(self, tmp_path):
+        """A generic exception during the HTTP call must not leave a dangling user entry."""
+        brain = _make_brain(tmp_path)
+        pre = list(brain.history)
+        with patch("requests.post", side_effect=RuntimeError("unexpected")):
+            text, is_action = brain.process("hello")
+        assert is_action is False
+        assert "error" in text.lower()
+        assert brain.history == pre
+
+    def test_empty_content_rolls_back_history(self, tmp_path):
+        """When the model returns empty content, the user entry must be rolled back
+        so history never accumulates a dangling user-only turn."""
+        brain = _make_brain(tmp_path)
+        pre = list(brain.history)
+        # Stream that yields only the done sentinel with no content tokens
+        done_line = json.dumps({"message": {"content": ""}, "done": True}).encode()
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.iter_lines = MagicMock(return_value=iter([done_line]))
+        with patch("requests.post", return_value=mock_resp):
+            text, is_action = brain.process("hello")
+        assert text == ""
+        assert is_action is False
+        # History must be identical to before the call — no orphaned entry.
+        assert brain.history == pre
+
+    def test_allowed_actions_live_in_system_prompt(self, tmp_path):
+        """Brain must use the current allowed_actions from config when building the
+        system prompt — changes between calls are reflected without restart.
+        Only the AÇÕES DISPONÍVEIS block is checked; the EXAMPLES section
+        always contains a fixed set of action names regardless of the filter."""
+        brain = _make_brain(tmp_path)
+        brain.config.set("allowed_actions", ["show_time"])
+        mock_resp = _mock_stream_response("ok")
+        with patch("requests.post", return_value=mock_resp) as mock_post:
+            brain.process("hello")
+        payload = mock_post.call_args[1]["json"]
+        system_msg = payload["messages"][0]["content"]
+        # Extract only the AÇÕES DISPONÍVEIS section (between header and EXEMPLOS).
+        start = system_msg.find("AÇÕES DISPONÍVEIS:")
+        end = system_msg.find("EXEMPLOS", start)
+        action_section = system_msg[start:end] if start != -1 and end != -1 else system_msg
+        assert "show_time" in action_section
+        assert "open_app" not in action_section
 
     def test_process_uses_live_config_url(self, tmp_path):
         """Brain reads ollama_url from config on each call, not cached at init."""
