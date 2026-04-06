@@ -1,7 +1,11 @@
 """VOX Control Center — main application window.
 
-Multi-tab interface covering:
-  Dashboard · Audio · Activation · Assistant · Actions · Aliases · Dirs · History · Diagnostics
+Shell layout: left navigation rail (NavRail) + QStackedWidget.
+Pages: Dashboard · Audio · Settings · History · Diagnostics
+
+The Settings page unifies Activation, Assistant, Voice/TTS, Permissions,
+App Aliases, and Search Directories into one scrollable surface, replacing
+the previous 5-tab flat navigation model with a real settings experience.
 
 Usage:
     cc = ControlCenter(config, app_state, speaker)
@@ -28,7 +32,7 @@ from audio_utils import (
     classify_capture_issue,
 )
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout,
+    QMainWindow, QWidget, QStackedWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QFrame, QPushButton, QComboBox, QLineEdit, QCheckBox,
     QSpinBox, QDoubleSpinBox, QListWidget, QListWidgetItem, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox, QGridLayout,
@@ -36,7 +40,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QSize
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QFont
 
 from utils.config import Config
 from ui.mic_meter import MicLevelBar
@@ -82,25 +86,34 @@ QMainWindow, QWidget {{
     font-size: 13px; font-family: {_FONT};
 }}
 
-/* ── Tab bar ── */
-QTabWidget::pane {{
-    border: 1px solid {_BORDER}; background: {_PANEL};
-    border-top-right-radius: 8px; border-bottom-left-radius: 8px;
-    border-bottom-right-radius: 8px;
+/* ── Nav rail ── */
+QWidget#nav_rail {{
+    background: {_PANEL};
+    border-right: 1px solid {_BORDER};
 }}
-QTabBar::tab {{
-    background: transparent; color: {_MUTED};
-    padding: 10px 20px; border: none;
-    border-bottom: 3px solid transparent;
-    font-size: 12px; font-weight: 500; letter-spacing: 0.3px;
+QPushButton#nav_btn {{
+    text-align: left;
+    padding: 12px 18px 12px 22px;
+    border: none;
+    border-left: 3px solid transparent;
+    border-radius: 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: {_MUTED};
+    background: transparent;
+    letter-spacing: 0.2px;
+    min-height: 42px;
 }}
-QTabBar::tab:selected {{
-    color: {_ACCENT}; border-bottom: 3px solid {_ACCENT};
-    font-weight: 700;
+QPushButton#nav_btn:checked {{
+    color: {_ACCENT};
+    background: rgba(168,85,247,0.10);
+    border-left: 3px solid {_ACCENT};
+    font-weight: 600;
 }}
-QTabBar::tab:hover:!selected {{
-    color: {_TEXT2}; border-bottom: 3px solid {_BORDER2};
-    background: rgba(255,255,255,0.025);
+QPushButton#nav_btn:hover:!checked {{
+    background: rgba(255,255,255,0.04);
+    color: {_TEXT2};
+    border-left: 3px solid rgba(168,85,247,0.20);
 }}
 
 /* ── Buttons ── */
@@ -266,14 +279,8 @@ def _note(text: str) -> QLabel:
 
 
 def _apply_tag(text: str, color: str | None = None) -> QLabel:
-    """Inline notice showing when a setting takes effect.
-
-    Uses a left accent border and a very subtle background tint so the
-    tag is visually distinct from surrounding form labels.
-    """
+    """Inline notice with left accent border showing when a setting takes effect."""
     c = color or _INFO
-    # Build a background colour from the same hue at very low alpha.
-    # We derive rgba from the hex colour if it's a simple 6-char hex.
     bg = "transparent"
     h = c.lstrip("#")
     if len(h) == 6:
@@ -307,6 +314,69 @@ def _status_chip(text: str, color: str) -> QLabel:
     return lbl
 
 
+# ── Settings page structural helpers ──────────────────────────────────────────
+
+def _settings_heading(title: str, description: str = "",
+                      top_margin: int = 28) -> QWidget:
+    """Large section title for the unified settings page."""
+    w = QWidget()
+    vb = QVBoxLayout(w)
+    vb.setContentsMargins(0, top_margin, 0, 12)
+    vb.setSpacing(5)
+    t = QLabel(title)
+    t.setStyleSheet(
+        f"color: {_TEXT}; font-size: 15px; font-weight: 600; "
+        f"letter-spacing: 0.2px; background: transparent;"
+    )
+    vb.addWidget(t)
+    if description:
+        d = QLabel(description)
+        d.setWordWrap(True)
+        d.setStyleSheet(
+            f"color: {_MUTED}; font-size: 12px; background: transparent; line-height: 1.5;"
+        )
+        vb.addWidget(d)
+    return w
+
+
+def _settings_card() -> QFrame:
+    """Subtle card container for a settings section's form content."""
+    f = QFrame()
+    f.setStyleSheet(
+        "QFrame {"
+        f"  background: rgba(255,255,255,0.018);"
+        f"  border: 1px solid {_BORDER};"
+        "  border-radius: 10px;"
+        "}"
+    )
+    return f
+
+
+def _settings_divider() -> QWidget:
+    """Full-width horizontal rule between settings sections, with spacing."""
+    w = QWidget()
+    vb = QVBoxLayout(w)
+    vb.setContentsMargins(0, 8, 0, 0)
+    vb.setSpacing(0)
+    f = QFrame()
+    f.setFrameShape(QFrame.Shape.HLine)
+    f.setFixedHeight(1)
+    f.setStyleSheet(f"background: {_BORDER}; border: none;")
+    vb.addWidget(f)
+    return w
+
+
+def _card_sep() -> QFrame:
+    """Subtle horizontal separator within a settings card."""
+    f = QFrame()
+    f.setFrameShape(QFrame.Shape.HLine)
+    f.setFixedHeight(1)
+    f.setStyleSheet("background: rgba(255,255,255,0.06); border: none;")
+    return f
+
+
+# ── Base settings panel ────────────────────────────────────────────────────────
+
 class _SettingsPanel(QWidget):
     def __init__(self, config: Config, parent=None):
         super().__init__(parent)
@@ -337,7 +407,7 @@ class _SettingsPanel(QWidget):
         return row, status, btn
 
 
-# ── Tab: Dashboard ─────────────────────────────────────────────────────────────
+# ── Page: Dashboard ────────────────────────────────────────────────────────────
 
 class DashboardTab(QWidget):
     def __init__(self, app_state, config: Config, parent=None):
@@ -375,7 +445,6 @@ class DashboardTab(QWidget):
         sc_layout.setContentsMargins(20, 16, 20, 16)
         sc_layout.setSpacing(14)
 
-        # Left: status indicator
         left_col = QVBoxLayout()
         left_col.setSpacing(4)
         status_hdr = QLabel("STATUS")
@@ -586,15 +655,15 @@ class DashboardTab(QWidget):
         )
 
 
-# ── Tab: Audio ─────────────────────────────────────────────────────────────────
+# ── Page: Audio ────────────────────────────────────────────────────────────────
 
 class AudioTab(_SettingsPanel):
-    _mic_test_done  = pyqtSignal(float, float)   # peak, normalised level
+    _mic_test_done  = pyqtSignal(float, float)
     _mic_test_error = pyqtSignal(str)
-    _calib_done     = pyqtSignal(dict)            # calibration result dict
+    _calib_done     = pyqtSignal(dict)
     _calib_error    = pyqtSignal(str)
-    _calib_phase    = pyqtSignal(str)             # status text update from background thread
-    _stt_done       = pyqtSignal(str, str, str)   # transcript, quality_label, explanation
+    _calib_phase    = pyqtSignal(str)
+    _stt_done       = pyqtSignal(str, str, str)
     _stt_error      = pyqtSignal(str)
 
     def __init__(self, config: Config, app_state, speaker,
@@ -605,12 +674,11 @@ class AudioTab(_SettingsPanel):
         self._state      = app_state
         self._speaker    = speaker
         self._restart_cb = restart_cb
-        self._stt_cb     = stt_cb   # Callable[[np.ndarray], str] | None
+        self._stt_cb     = stt_cb
         self._build()
         self._connect()
 
     def _build(self) -> None:
-        # Scrollable root so content is accessible on smaller screens
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -661,10 +729,10 @@ class AudioTab(_SettingsPanel):
         hv.setVerticalSpacing(6)
         hv.setColumnStretch(1, 1)
 
-        self._lbl_noise    = QLabel("–")
-        self._lbl_snr      = QLabel("–")
-        self._lbl_clip     = QLabel("–")
-        self._lbl_quality  = QLabel("–")
+        self._lbl_noise   = QLabel("–")
+        self._lbl_snr     = QLabel("–")
+        self._lbl_clip    = QLabel("–")
+        self._lbl_quality = QLabel("–")
 
         for row, (label, widget) in enumerate([
             ("Noise Floor (RMS)", self._lbl_noise),
@@ -748,7 +816,6 @@ class AudioTab(_SettingsPanel):
         save_row, self._save_lbl, btn_save = self._save_row()
         root.addLayout(save_row)
 
-        # Wire up
         self._populate_devices()
         btn_save.clicked.connect(self._save)
         self._btn_mic.clicked.connect(self._test_mic)
@@ -822,8 +889,6 @@ class AudioTab(_SettingsPanel):
             self._state.add_diagnostic("info", "Microphone device changed — listener restarted.")
         self._show_saved(self._save_lbl, True, msg)
 
-    # ── Mic test ───────────────────────────────────────────────────────────────
-
     def _test_mic(self) -> None:
         self._test_lbl.setText("Recording for 3 s…")
         self._test_lbl.setStyleSheet(f"color: {_WARNING}; font-size: 11px;")
@@ -869,8 +934,6 @@ class AudioTab(_SettingsPanel):
             self._test_lbl.setText("Speaker unavailable.")
             self._test_lbl.setStyleSheet(f"color: {_ERROR}; font-size: 11px;")
 
-    # ── Calibration ────────────────────────────────────────────────────────────
-
     def _run_calibration(self) -> None:
         self._btn_calib.setEnabled(False)
         self._btn_apply_thresh.setVisible(False)
@@ -883,14 +946,12 @@ class AudioTab(_SettingsPanel):
         def _run() -> None:
             try:
                 SR = 16000
-                # Phase 1: silence
                 silence_data = sd.rec(SR * 3, samplerate=SR, channels=1,
                                       dtype="float32", device=mic_idx)
                 sd.wait()
                 silence_audio = silence_data.flatten()
                 noise_floor   = estimate_noise_floor(silence_audio)
 
-                # Phase 2: speech
                 self._calib_phase.emit("Phase 2/2 — Speak normally for 3 seconds…")
                 speech_data = sd.rec(SR * 3, samplerate=SR, channels=1,
                                      dtype="float32", device=mic_idx)
@@ -933,7 +994,6 @@ class AudioTab(_SettingsPanel):
             "good": _SUCCESS, "fair": _WARNING, "poor": _ERROR, "no_signal": _ERROR
         }.get(ql, _MUTED)
 
-        # Structured issue diagnosis
         sil_thresh = float(self._config.get("silence_threshold", 0.02))
         diagnosis  = classify_capture_issue(nf, result["speech_rms"], cf, sil_thresh)
         sev_color  = {
@@ -961,7 +1021,6 @@ class AudioTab(_SettingsPanel):
         self._suggested_threshold = sug
         self._btn_apply_thresh.setVisible(True)
 
-        # Update health card
         self._lbl_noise.setText(f"{nf:.4f}")
         self._lbl_snr.setText(snr_text)
         self._lbl_clip.setText(f"{cf*100:.1f}%")
@@ -995,8 +1054,6 @@ class AudioTab(_SettingsPanel):
                 "info",
                 f"Silence threshold set to {self._suggested_threshold:.4f} from calibration.",
             )
-
-    # ── STT test ───────────────────────────────────────────────────────────────
 
     def _run_stt_test(self) -> None:
         if self._stt_cb is None:
@@ -1052,299 +1109,266 @@ class AudioTab(_SettingsPanel):
         self._stt_result.setStyleSheet(f"color: {_ERROR}; font-size: 11px;")
 
 
-# ── Tab: Activation ────────────────────────────────────────────────────────────
+# ── Page: Settings (unified) ───────────────────────────────────────────────────
 
-class ActivationTab(_SettingsPanel):
-    def __init__(self, config: Config, restart_cb: Callable | None = None, parent=None):
+class SettingsPage(_SettingsPanel):
+    """Unified settings page — Activation · Assistant · Voice/TTS ·
+    Permissions · App Aliases · Search Directories in one scrollable surface.
+
+    Replaces the previous five separate settings tabs with a single coherent
+    configuration experience where users can see and navigate all settings
+    without switching between tabs.
+    """
+
+    def __init__(self, config: Config, speaker=None, app_state=None,
+                 restart_cb: Callable | None = None,
+                 reload_cb:  Callable | None = None,
+                 language_changed_cb: Callable | None = None,
+                 parent=None):
         super().__init__(config, parent)
-        self._restart_cb = restart_cb
+        self._speaker             = speaker
+        self._state               = app_state
+        self._restart_cb          = restart_cb
+        self._reload_cb           = reload_cb
+        self._language_changed_cb = language_changed_cb
         self._build()
 
-    def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(14)
+    # ── Build ──────────────────────────────────────────────────────────────────
 
-        # Mode
-        grp_mode = QGroupBox("Activation Mode")
-        mv = QVBoxLayout(grp_mode)
-        self._rb_wake = QRadioButton("Wake Word  —  always listening, activates on spoken word")
-        self._rb_ptt  = QRadioButton("Push-to-Talk  —  manual hotkey to start recording")
+    def _build(self) -> None:
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        scroll.setWidget(inner)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+        root = QVBoxLayout(inner)
+        root.setContentsMargins(32, 8, 32, 32)
+        root.setSpacing(0)
+
+        self._build_activation(root)
+        root.addSpacing(8)
+        root.addWidget(_settings_divider())
+
+        self._build_assistant(root)
+        root.addSpacing(8)
+        root.addWidget(_settings_divider())
+
+        self._build_voice(root)
+        root.addSpacing(8)
+        root.addWidget(_settings_divider())
+
+        self._build_permissions(root)
+        root.addSpacing(8)
+        root.addWidget(_settings_divider())
+
+        self._build_aliases(root)
+        root.addSpacing(8)
+        root.addWidget(_settings_divider())
+
+        self._build_directories(root)
+
+        root.addStretch()
+        self._load_all()
+
+    # ── Activation section ────────────────────────────────────────────────────
+
+    def _build_activation(self, root: QVBoxLayout) -> None:
+        root.addWidget(_settings_heading(
+            "Activation",
+            "Configure how VOX listens for your commands.",
+            top_margin=20,
+        ))
+
+        card = _settings_card()
+        cv = QVBoxLayout(card)
+        cv.setContentsMargins(20, 18, 20, 18)
+        cv.setSpacing(14)
+
+        mode_label = QLabel("Activation Mode")
+        mode_label.setStyleSheet(
+            f"color: {_TEXT}; font-size: 12px; font-weight: 600; background: transparent;"
+        )
+        cv.addWidget(mode_label)
+
+        self._rb_wake = QRadioButton("Wake Word  —  always listening, activates on spoken phrase")
+        self._rb_ptt  = QRadioButton("Push-to-Talk  —  manual hotkey starts and stops recording")
         self._mode_grp = QButtonGroup(self)
         self._mode_grp.addButton(self._rb_wake, 0)
         self._mode_grp.addButton(self._rb_ptt,  1)
-        mv.addWidget(self._rb_wake)
-        mv.addWidget(self._rb_ptt)
-        root.addWidget(grp_mode)
+        cv.addWidget(self._rb_wake)
+        cv.addWidget(self._rb_ptt)
 
-        # Wake word params
-        grp_ww = QGroupBox("Wake Word")
-        wv = QGridLayout(grp_ww)
-        wv.setColumnMinimumWidth(0, 160)
-        wv.setHorizontalSpacing(16)
-        wv.setVerticalSpacing(10)
-        wv.setColumnStretch(1, 1)
+        cv.addWidget(_card_sep())
 
-        wv.addWidget(_section("Wake Word"), 0, 0)
+        form = QGridLayout()
+        form.setColumnMinimumWidth(0, 220)
+        form.setHorizontalSpacing(20)
+        form.setVerticalSpacing(12)
+        form.setColumnStretch(1, 1)
+
+        form.addWidget(_section("Wake Word"), 0, 0)
         self._edit_ww = QLineEdit()
         self._edit_ww.setPlaceholderText("vox")
-        wv.addWidget(self._edit_ww, 0, 1)
+        form.addWidget(self._edit_ww, 0, 1)
 
-        root.addWidget(grp_ww)
-
-        # PTT
-        grp_ptt = QGroupBox("Push-to-Talk")
-        pv = QGridLayout(grp_ptt)
-        pv.setColumnMinimumWidth(0, 160)
-        pv.setHorizontalSpacing(16)
-        pv.setVerticalSpacing(10)
-        pv.setColumnStretch(1, 1)
-
-        pv.addWidget(_section("Key Combination"), 0, 0)
+        form.addWidget(_section("PTT Key Combination"), 1, 0)
         self._edit_ptt = QLineEdit()
         self._edit_ptt.setPlaceholderText("ctrl+shift")
-        pv.addWidget(self._edit_ptt, 0, 1)
-        pv.addWidget(_note("Use + to combine keys, e.g. ctrl+shift or alt+z"), 1, 0, 1, 2)
+        form.addWidget(self._edit_ptt, 1, 1)
+        form.addWidget(_note("Combine keys with +, e.g.  ctrl+shift  or  alt+z"), 2, 1)
 
-        root.addWidget(grp_ptt)
-
-        # Capture params
-        grp_cap = QGroupBox("Capture Parameters")
-        cv = QGridLayout(grp_cap)
-        cv.setColumnMinimumWidth(0, 200)
-        cv.setHorizontalSpacing(16)
-        cv.setVerticalSpacing(10)
-        cv.setColumnStretch(1, 1)
-
-        cv.addWidget(_section("Silence Threshold (RMS)"), 0, 0)
+        form.addWidget(_section("Silence Threshold (RMS)"), 3, 0)
         self._spin_sil_thresh = QDoubleSpinBox()
         self._spin_sil_thresh.setRange(0.001, 0.2)
         self._spin_sil_thresh.setSingleStep(0.005)
         self._spin_sil_thresh.setDecimals(3)
-        cv.addWidget(self._spin_sil_thresh, 0, 1)
+        form.addWidget(self._spin_sil_thresh, 3, 1)
 
-        cv.addWidget(_section("Silence Duration (s)"), 1, 0)
+        form.addWidget(_section("Silence Duration (s)"), 4, 0)
         self._spin_sil_dur = QDoubleSpinBox()
         self._spin_sil_dur.setRange(0.3, 5.0)
         self._spin_sil_dur.setSingleStep(0.1)
         self._spin_sil_dur.setDecimals(1)
-        cv.addWidget(self._spin_sil_dur, 1, 1)
+        form.addWidget(self._spin_sil_dur, 4, 1)
 
-        cv.addWidget(_note("Silence threshold: RMS below this value counts as silence. "
-                           "Silence duration: how many consecutive silent seconds end a command."),
-                     2, 0, 1, 2)
+        cv.addLayout(form)
+        root.addWidget(card)
 
-        root.addWidget(grp_cap)
-        root.addWidget(_apply_tag("Activation mode and PTT key: listener restarts on save.", _WARNING))
-        root.addWidget(_apply_tag("Silence parameters: apply immediately on next command capture.", _INFO))
-        root.addWidget(_apply_tag("Wake word: applies on next detection cycle.", _INFO))
-        root.addStretch()
+        root.addSpacing(8)
+        root.addWidget(_apply_tag(
+            "Activation mode and PTT key restart the listener on save.", _WARNING))
+        root.addWidget(_apply_tag(
+            "Wake word and silence parameters apply on next capture cycle.", _INFO))
+        root.addSpacing(2)
 
-        save_row, self._save_lbl, btn_save = self._save_row()
+        save_row, self._save_lbl_act, btn = self._save_row()
         root.addLayout(save_row)
+        btn.clicked.connect(self._save_activation)
 
-        btn_save.clicked.connect(self._save)
-        self._load()
+    # ── Assistant section ─────────────────────────────────────────────────────
 
-    def _load(self) -> None:
-        c = self._config
-        mode = c.get("activation_mode", "wake_word")
-        self._rb_wake.setChecked(mode != "push_to_talk")
-        self._rb_ptt.setChecked(mode == "push_to_talk")
-        self._edit_ww.setText(str(c.get("wake_word", "vox")))
-        self._edit_ptt.setText(str(c.get("push_to_talk_key", "ctrl+shift")))
-        self._spin_sil_thresh.setValue(float(c.get("silence_threshold", 0.01)))
-        self._spin_sil_dur.setValue(float(c.get("silence_duration", 1.5)))
+    def _build_assistant(self, root: QVBoxLayout) -> None:
+        root.addWidget(_settings_heading(
+            "Assistant",
+            "Language model endpoint, response history, and transcription language.",
+        ))
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._load()
+        card = _settings_card()
+        form = QGridLayout(card)
+        form.setContentsMargins(20, 18, 20, 18)
+        form.setColumnMinimumWidth(0, 220)
+        form.setHorizontalSpacing(20)
+        form.setVerticalSpacing(12)
+        form.setColumnStretch(1, 1)
 
-    def _save(self) -> None:
-        c = self._config
-        prev_mode = c.get("activation_mode", "wake_word")
-        prev_ptt  = c.get("push_to_talk_key", "ctrl+shift")
-
-        mode = "push_to_talk" if self._rb_ptt.isChecked() else "wake_word"
-        c.set("activation_mode",   mode)
-        c.set("wake_word",         self._edit_ww.text().strip() or "vox")
-        c.set("push_to_talk_key",  self._edit_ptt.text().strip() or "ctrl+shift")
-        c.set("silence_threshold", round(self._spin_sil_thresh.value(), 3))
-        c.set("silence_duration",  round(self._spin_sil_dur.value(), 1))
-        c.save()
-
-        new_ptt = c.get("push_to_talk_key")
-        needs_restart = (mode != prev_mode or new_ptt != prev_ptt)
-        if needs_restart and self._restart_cb:
-            self._restart_cb()
-            self._show_saved(self._save_lbl, ok=True, msg="Saved — listener restarted.")
-        else:
-            self._show_saved(self._save_lbl)
-
-
-# ── Tab: Assistant ─────────────────────────────────────────────────────────────
-
-class AssistantTab(_SettingsPanel):
-    def __init__(self, config: Config, speaker=None, language_changed_cb=None, parent=None):
-        super().__init__(config, parent)
-        self._speaker = speaker
-        self._language_changed_cb = language_changed_cb
-        self._build()
-
-    def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(14)
-
-        grp_llm = QGroupBox("Language Model (Ollama)")
-        gv = QGridLayout(grp_llm)
-        gv.setColumnMinimumWidth(0, 160)
-        gv.setHorizontalSpacing(16)
-        gv.setVerticalSpacing(10)
-        gv.setColumnStretch(1, 1)
-
-        gv.addWidget(_section("Ollama URL"), 0, 0)
+        form.addWidget(_section("Ollama URL"), 0, 0)
         self._edit_url = QLineEdit()
-        gv.addWidget(self._edit_url, 0, 1)
+        form.addWidget(self._edit_url, 0, 1)
 
-        gv.addWidget(_section("Model"), 1, 0)
+        form.addWidget(_section("Model"), 1, 0)
         self._edit_model = QLineEdit()
         self._edit_model.setPlaceholderText("qwen2.5:14b")
-        gv.addWidget(self._edit_model, 1, 1)
+        form.addWidget(self._edit_model, 1, 1)
 
-        gv.addWidget(_section("History Size (turns)"), 2, 0)
+        form.addWidget(_section("History Size (turns)"), 2, 0)
         self._spin_hist = QSpinBox()
         self._spin_hist.setRange(1, 100)
-        gv.addWidget(self._spin_hist, 2, 1)
+        form.addWidget(self._spin_hist, 2, 1)
 
-        root.addWidget(grp_llm)
-        root.addWidget(_apply_tag("LLM URL and model: apply on next request.", _INFO))
-
-        grp_stt = QGroupBox("Speech Recognition (Whisper)")
-        sv = QGridLayout(grp_stt)
-        sv.setColumnMinimumWidth(0, 160)
-        sv.setHorizontalSpacing(16)
-        sv.setVerticalSpacing(10)
-        sv.setColumnStretch(1, 1)
-
-        sv.addWidget(_section("Language"), 0, 0)
+        form.addWidget(_section("Transcription Language"), 3, 0)
         self._combo_lang = QComboBox()
-        for val, label in [("auto", "Auto-detect"), ("pt", "Portuguese (pt)"), ("en", "English (en)")]:
+        for val, label in [
+            ("auto", "Auto-detect"),
+            ("pt",   "Portuguese (pt)"),
+            ("en",   "English (en)"),
+        ]:
             self._combo_lang.addItem(label, val)
-        sv.addWidget(self._combo_lang, 0, 1)
+        form.addWidget(self._combo_lang, 3, 1)
 
-        root.addWidget(grp_stt)
+        root.addWidget(card)
 
-        grp_tts = QGroupBox("Text-to-Speech (Piper)")
-        tv = QGridLayout(grp_tts)
-        tv.setColumnMinimumWidth(0, 160)
-        tv.setHorizontalSpacing(16)
-        tv.setVerticalSpacing(10)
-        tv.setColumnStretch(1, 1)
+        root.addSpacing(8)
+        root.addWidget(_apply_tag("URL and model apply on the next request.", _INFO))
+        root.addWidget(_apply_tag("Language applies on the next transcription.", _INFO))
+        root.addSpacing(2)
 
-        tv.addWidget(_section("Enable TTS"), 0, 0)
+        save_row, self._save_lbl_ast, btn = self._save_row()
+        root.addLayout(save_row)
+        btn.clicked.connect(self._save_assistant)
+
+    # ── Voice & TTS section ───────────────────────────────────────────────────
+
+    def _build_voice(self, root: QVBoxLayout) -> None:
+        root.addWidget(_settings_heading(
+            "Voice & TTS",
+            "Text-to-speech engine and voice model. Changes apply on next spoken response.",
+        ))
+
+        card = _settings_card()
+        form = QGridLayout(card)
+        form.setContentsMargins(20, 18, 20, 18)
+        form.setColumnMinimumWidth(0, 220)
+        form.setHorizontalSpacing(20)
+        form.setVerticalSpacing(12)
+        form.setColumnStretch(1, 1)
+
+        form.addWidget(_section("Enable TTS"), 0, 0)
         self._chk_tts = QCheckBox("")
-        tv.addWidget(self._chk_tts, 0, 1)
+        form.addWidget(self._chk_tts, 0, 1)
 
-        tv.addWidget(_section("Voice Model (.onnx)"), 1, 0)
+        form.addWidget(_section("Voice Model (.onnx)"), 1, 0)
         voice_row = QHBoxLayout()
         self._edit_voice = QLineEdit()
         self._btn_browse = QPushButton("Browse…")
-        self._btn_browse.setFixedWidth(80)
+        self._btn_browse.setFixedWidth(90)
         voice_row.addWidget(self._edit_voice)
+        voice_row.addSpacing(8)
         voice_row.addWidget(self._btn_browse)
-        tv.addLayout(voice_row, 1, 1)
+        form.addLayout(voice_row, 1, 1)
 
-        root.addWidget(grp_tts)
-        root.addWidget(_apply_tag("TTS settings: apply immediately on next speech.", _INFO))
-        root.addStretch()
+        root.addWidget(card)
 
-        save_row, self._save_lbl, btn_save = self._save_row()
+        root.addSpacing(8)
+        root.addWidget(_apply_tag(
+            "TTS toggle and voice model apply immediately on next speech.", _INFO))
+        root.addSpacing(2)
+
+        save_row, self._save_lbl_voice, btn = self._save_row()
         root.addLayout(save_row)
-
-        btn_save.clicked.connect(self._save)
+        btn.clicked.connect(self._save_voice)
         self._btn_browse.clicked.connect(self._browse_voice)
-        self._load()
 
-    def _load(self) -> None:
-        c = self._config
-        self._edit_url.setText(c.get("ollama_url", "http://localhost:11434"))
-        self._edit_model.setText(c.get("ollama_model", "qwen2.5:14b"))
-        self._spin_hist.setValue(int(c.get("max_history", 20)))
-        lang = c.get("language", "auto")
-        for i in range(self._combo_lang.count()):
-            if self._combo_lang.itemData(i) == lang:
-                self._combo_lang.setCurrentIndex(i)
-                break
-        self._chk_tts.setChecked(bool(c.get("tts_enabled", True)))
-        self._edit_voice.setText(c.get("voice_model", ""))
+    # ── Permissions section ───────────────────────────────────────────────────
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._load()
-
-    def _browse_voice(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select Voice Model", "", "ONNX files (*.onnx);;All files (*)"
-        )
-        if path:
-            self._edit_voice.setText(path)
-
-    def _save(self) -> None:
-        c = self._config
-        prev_lang = c.get("language", "auto")
-        c.set("ollama_url",   self._edit_url.text().strip())
-        c.set("ollama_model", self._edit_model.text().strip())
-        c.set("max_history",  self._spin_hist.value())
-        c.set("language",     self._combo_lang.currentData())
-        c.set("tts_enabled",  self._chk_tts.isChecked())
-        c.set("voice_model",  self._edit_voice.text().strip())
-        c.save()
-        # Speaker reads config live so no reload is strictly needed,
-        # but call reload_config() for any speaker that still caches state.
-        if self._speaker:
-            self._speaker.reload_config()
-        # Notify main app when language changes so the overlay badge and
-        # AppState stay in sync without a full listener restart.
-        new_lang = c.get("language", "auto")
-        if new_lang != prev_lang and self._language_changed_cb:
-            self._language_changed_cb(new_lang)
-        self._show_saved(self._save_lbl)
-
-
-# ── Tab: Actions & Permissions ─────────────────────────────────────────────────
-
-class ActionsTab(_SettingsPanel):
-    def __init__(self, config: Config, reload_cb: Callable | None = None, parent=None):
-        super().__init__(config, parent)
-        self._reload_cb = reload_cb
-        self._build()
-
-    def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(10)
-
-        root.addWidget(_section("Enabled Actions"))
-        root.addWidget(_note(
-            "Only enabled actions can be executed by the assistant. "
-            "Disabling an action prevents the LLM from triggering it, "
-            "even if it appears in a response."
+    def _build_permissions(self, root: QVBoxLayout) -> None:
+        root.addWidget(_settings_heading(
+            "Permissions",
+            "Only enabled actions can be triggered by the assistant. "
+            "Disabling an action blocks it immediately — no restart required.",
         ))
 
-        self._table = QTableWidget(0, 4)
-        self._table.setHorizontalHeaderLabels(["", "Action", "Description", "Risk"])
-        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(0, 30)
-        self._table.setColumnWidth(3, 72)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.setShowGrid(False)
-        root.addWidget(self._table, 1)
+        self._actions_table = QTableWidget(0, 4)
+        self._actions_table.setHorizontalHeaderLabels(["", "Action", "Description", "Risk"])
+        self._actions_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Fixed)
+        self._actions_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents)
+        self._actions_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch)
+        self._actions_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.Fixed)
+        self._actions_table.setColumnWidth(0, 30)
+        self._actions_table.setColumnWidth(3, 72)
+        self._actions_table.verticalHeader().setVisible(False)
+        self._actions_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._actions_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._actions_table.setShowGrid(False)
+        self._actions_table.setMinimumHeight(320)
+        root.addWidget(self._actions_table)
 
         btn_row = QHBoxLayout()
         btn_all  = QPushButton("Enable All")
@@ -1357,30 +1381,183 @@ class ActionsTab(_SettingsPanel):
         btn_row.addStretch()
         root.addLayout(btn_row)
 
-        root.addWidget(_apply_tag("Changes apply on the next voice command — no restart required.", _INFO))
+        root.addSpacing(8)
+        root.addWidget(_apply_tag(
+            "Changes apply on the next voice command — no restart required.", _INFO))
+        root.addSpacing(2)
 
-        save_row, self._save_lbl, btn_save = self._save_row()
+        save_row, self._save_lbl_perm, btn_save = self._save_row()
         root.addLayout(save_row)
 
-        btn_all.clicked.connect(lambda: self._set_all(True))
-        btn_none.clicked.connect(lambda: self._set_all(False))
-        btn_def.clicked.connect(self._restore_defaults)
-        btn_save.clicked.connect(self._save)
-        self._load()
+        btn_all.clicked.connect(lambda: self._set_all_actions(True))
+        btn_none.clicked.connect(lambda: self._set_all_actions(False))
+        btn_def.clicked.connect(self._restore_default_actions)
+        btn_save.clicked.connect(self._save_permissions)
 
-    def _load(self) -> None:
+    # ── App Aliases section ───────────────────────────────────────────────────
+
+    def _build_aliases(self, root: QVBoxLayout) -> None:
+        root.addWidget(_settings_heading(
+            "App Aliases",
+            'Maps spoken names to commands or URI schemes. '
+            'Example: "discord" → discord://  or  "vscode" → code',
+        ))
+
+        self._alias_table = QTableWidget(0, 2)
+        self._alias_table.setHorizontalHeaderLabels(
+            ["Spoken Name", "Target (command or URI)"])
+        self._alias_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch)
+        self._alias_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch)
+        self._alias_table.verticalHeader().setVisible(False)
+        self._alias_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        self._alias_table.setMinimumHeight(160)
+        root.addWidget(self._alias_table)
+
+        btn_row = QHBoxLayout()
+        self._btn_alias_add = QPushButton("Add")
+        self._btn_alias_del = QPushButton("Remove Selected")
+        self._btn_alias_del.setObjectName("danger")
+        btn_row.addWidget(self._btn_alias_add)
+        btn_row.addWidget(self._btn_alias_del)
+        btn_row.addStretch()
+        root.addLayout(btn_row)
+
+        save_row, self._save_lbl_alias, btn_save = self._save_row()
+        root.addLayout(save_row)
+
+        self._btn_alias_add.clicked.connect(self._alias_add_row)
+        self._btn_alias_del.clicked.connect(self._alias_del_row)
+        btn_save.clicked.connect(self._save_aliases)
+
+    # ── Directories section ───────────────────────────────────────────────────
+
+    def _build_directories(self, root: QVBoxLayout) -> None:
+        root.addWidget(_settings_heading(
+            "Search Directories",
+            "Directories searched when you ask the assistant to find a file. "
+            "~ expands to your home directory.",
+        ))
+
+        self._dirs_list = QListWidget()
+        self._dirs_list.setMinimumHeight(120)
+        root.addWidget(self._dirs_list)
+
+        btn_row = QHBoxLayout()
+        self._btn_dir_add = QPushButton("Add Directory…")
+        self._btn_dir_del = QPushButton("Remove Selected")
+        self._btn_dir_del.setObjectName("danger")
+        self._btn_dir_def = QPushButton("Restore Defaults")
+        btn_row.addWidget(self._btn_dir_add)
+        btn_row.addWidget(self._btn_dir_del)
+        btn_row.addWidget(self._btn_dir_def)
+        btn_row.addStretch()
+        root.addLayout(btn_row)
+
+        save_row, self._save_lbl_dirs, btn_save = self._save_row()
+        root.addLayout(save_row)
+
+        self._btn_dir_add.clicked.connect(self._dirs_add)
+        self._btn_dir_del.clicked.connect(self._dirs_del)
+        self._btn_dir_def.clicked.connect(self._dirs_restore_defaults)
+        btn_save.clicked.connect(self._save_directories)
+
+    # ── Load / Save ────────────────────────────────────────────────────────────
+
+    def _load_all(self) -> None:
+        c = self._config
+        # Activation
+        mode = c.get("activation_mode", "wake_word")
+        self._rb_wake.setChecked(mode != "push_to_talk")
+        self._rb_ptt.setChecked(mode == "push_to_talk")
+        self._edit_ww.setText(str(c.get("wake_word", "vox")))
+        self._edit_ptt.setText(str(c.get("push_to_talk_key", "ctrl+shift")))
+        self._spin_sil_thresh.setValue(float(c.get("silence_threshold", 0.01)))
+        self._spin_sil_dur.setValue(float(c.get("silence_duration", 1.5)))
+        # Assistant
+        self._edit_url.setText(c.get("ollama_url", "http://localhost:11434"))
+        self._edit_model.setText(c.get("ollama_model", "qwen2.5:14b"))
+        self._spin_hist.setValue(int(c.get("max_history", 20)))
+        lang = c.get("language", "auto")
+        for i in range(self._combo_lang.count()):
+            if self._combo_lang.itemData(i) == lang:
+                self._combo_lang.setCurrentIndex(i)
+                break
+        # Voice
+        self._chk_tts.setChecked(bool(c.get("tts_enabled", True)))
+        self._edit_voice.setText(c.get("voice_model", ""))
+        # Tables
+        self._load_actions()
+        self._load_aliases()
+        self._load_dirs()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._load_all()
+
+    def _save_activation(self) -> None:
+        c = self._config
+        prev_mode = c.get("activation_mode", "wake_word")
+        prev_ptt  = c.get("push_to_talk_key", "ctrl+shift")
+        mode = "push_to_talk" if self._rb_ptt.isChecked() else "wake_word"
+        c.set("activation_mode",   mode)
+        c.set("wake_word",         self._edit_ww.text().strip() or "vox")
+        c.set("push_to_talk_key",  self._edit_ptt.text().strip() or "ctrl+shift")
+        c.set("silence_threshold", round(self._spin_sil_thresh.value(), 3))
+        c.set("silence_duration",  round(self._spin_sil_dur.value(), 1))
+        c.save()
+        new_ptt = c.get("push_to_talk_key")
+        needs_restart = (mode != prev_mode or new_ptt != prev_ptt)
+        if needs_restart and self._restart_cb:
+            self._restart_cb()
+            self._show_saved(self._save_lbl_act, ok=True, msg="Saved — listener restarted.")
+        else:
+            self._show_saved(self._save_lbl_act)
+
+    def _save_assistant(self) -> None:
+        c = self._config
+        prev_lang = c.get("language", "auto")
+        c.set("ollama_url",   self._edit_url.text().strip())
+        c.set("ollama_model", self._edit_model.text().strip())
+        c.set("max_history",  self._spin_hist.value())
+        c.set("language",     self._combo_lang.currentData())
+        c.save()
+        new_lang = c.get("language", "auto")
+        if new_lang != prev_lang and self._language_changed_cb:
+            self._language_changed_cb(new_lang)
+        self._show_saved(self._save_lbl_ast)
+
+    def _save_voice(self) -> None:
+        c = self._config
+        c.set("tts_enabled", self._chk_tts.isChecked())
+        c.set("voice_model", self._edit_voice.text().strip())
+        c.save()
+        if self._speaker:
+            self._speaker.reload_config()
+        self._show_saved(self._save_lbl_voice)
+
+    def _browse_voice(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Voice Model", "", "ONNX files (*.onnx);;All files (*)"
+        )
+        if path:
+            self._edit_voice.setText(path)
+
+    def _load_actions(self) -> None:
         allowed = set(self._config.get("allowed_actions", []))
         _risk_colors = {"low": _SUCCESS, "medium": _WARNING, "high": _ERROR}
-        self._table.setRowCount(0)
+        self._actions_table.setRowCount(0)
         for action, desc, risk in _ALL_ACTIONS:
-            row = self._table.rowCount()
-            self._table.insertRow(row)
+            row = self._actions_table.rowCount()
+            self._actions_table.insertRow(row)
             chk = QCheckBox()
             chk.setChecked(action in allowed)
             chk.setStyleSheet("margin-left: 6px;")
-            self._table.setCellWidget(row, 0, chk)
-            self._table.setItem(row, 1, QTableWidgetItem(action))
-            self._table.setItem(row, 2, QTableWidgetItem(desc))
+            self._actions_table.setCellWidget(row, 0, chk)
+            self._actions_table.setItem(row, 1, QTableWidgetItem(action))
+            self._actions_table.setItem(row, 2, QTableWidgetItem(desc))
             rc = _risk_colors.get(risk, _MUTED)
             risk_lbl = QLabel(f" {risk} ")
             risk_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1389,192 +1566,96 @@ class ActionsTab(_SettingsPanel):
                 f"border: 1px solid {rc}; border-radius: 4px; "
                 "padding: 1px 4px; background: transparent; letter-spacing: 0.2px;"
             )
-            self._table.setCellWidget(row, 3, risk_lbl)
-            self._table.setRowHeight(row, 36)
+            self._actions_table.setCellWidget(row, 3, risk_lbl)
+            self._actions_table.setRowHeight(row, 36)
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._load()
-
-    def _set_all(self, state: bool) -> None:
-        for row in range(self._table.rowCount()):
-            chk = self._table.cellWidget(row, 0)
+    def _set_all_actions(self, state: bool) -> None:
+        for row in range(self._actions_table.rowCount()):
+            chk = self._actions_table.cellWidget(row, 0)
             if chk:
                 chk.setChecked(state)
 
-    def _restore_defaults(self) -> None:
+    def _restore_default_actions(self) -> None:
         from utils.config import DEFAULT_CONFIG
         defaults = set(DEFAULT_CONFIG.get("allowed_actions", []))
-        for row in range(self._table.rowCount()):
-            action = self._table.item(row, 1)
-            chk    = self._table.cellWidget(row, 0)
+        for row in range(self._actions_table.rowCount()):
+            action = self._actions_table.item(row, 1)
+            chk    = self._actions_table.cellWidget(row, 0)
             if action and chk:
                 chk.setChecked(action.text() in defaults)
 
-    def _save(self) -> None:
+    def _save_permissions(self) -> None:
         enabled = []
-        for row in range(self._table.rowCount()):
-            chk    = self._table.cellWidget(row, 0)
-            action = self._table.item(row, 1)
+        for row in range(self._actions_table.rowCount()):
+            chk    = self._actions_table.cellWidget(row, 0)
+            action = self._actions_table.item(row, 1)
             if chk and action and chk.isChecked():
                 enabled.append(action.text())
         self._config.set("allowed_actions", enabled)
         self._config.save()
         if self._reload_cb:
             self._reload_cb()
-        self._show_saved(self._save_lbl)
+        self._show_saved(self._save_lbl_perm)
 
-
-# ── Tab: Apps & Aliases ────────────────────────────────────────────────────────
-
-class AliasesTab(_SettingsPanel):
-    def __init__(self, config: Config, parent=None):
-        super().__init__(config, parent)
-        self._build()
-
-    def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(10)
-
-        root.addWidget(_section("App Aliases"))
-        root.addWidget(_note(
-            "Maps spoken names to executable commands or URI schemes. "
-            'E.g. "discord" → discord://   or   "vscode" → code'
-        ))
-
-        self._table = QTableWidget(0, 2)
-        self._table.setHorizontalHeaderLabels(["Spoken Name", "Target (command or URI)"])
-        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        root.addWidget(self._table, 1)
-
-        btn_row = QHBoxLayout()
-        self._btn_add = QPushButton("Add")
-        self._btn_del = QPushButton("Remove Selected")
-        self._btn_del.setObjectName("danger")
-        btn_row.addWidget(self._btn_add)
-        btn_row.addWidget(self._btn_del)
-        btn_row.addStretch()
-        root.addLayout(btn_row)
-
-        save_row, self._save_lbl, btn_save = self._save_row()
-        root.addLayout(save_row)
-
-        self._btn_add.clicked.connect(self._add_row)
-        self._btn_del.clicked.connect(self._del_row)
-        btn_save.clicked.connect(self._save)
-        self._load()
-
-    def _load(self) -> None:
+    def _load_aliases(self) -> None:
         aliases = self._config.get("app_aliases", {})
-        self._table.setRowCount(0)
+        self._alias_table.setRowCount(0)
         for name, target in sorted(aliases.items()):
-            self._add_row(name, str(target))
+            self._alias_add_row(name, str(target))
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._load()
+    def _alias_add_row(self, name: str = "", target: str = "") -> None:
+        row = self._alias_table.rowCount()
+        self._alias_table.insertRow(row)
+        self._alias_table.setItem(row, 0, QTableWidgetItem(name))
+        self._alias_table.setItem(row, 1, QTableWidgetItem(target))
+        self._alias_table.setRowHeight(row, 30)
 
-    def _add_row(self, name: str = "", target: str = "") -> None:
-        row = self._table.rowCount()
-        self._table.insertRow(row)
-        self._table.setItem(row, 0, QTableWidgetItem(name))
-        self._table.setItem(row, 1, QTableWidgetItem(target))
-        self._table.setRowHeight(row, 26)
-
-    def _del_row(self) -> None:
-        rows = sorted({idx.row() for idx in self._table.selectedIndexes()}, reverse=True)
+    def _alias_del_row(self) -> None:
+        rows = sorted(
+            {idx.row() for idx in self._alias_table.selectedIndexes()}, reverse=True
+        )
         for r in rows:
-            self._table.removeRow(r)
+            self._alias_table.removeRow(r)
 
-    def _save(self) -> None:
+    def _save_aliases(self) -> None:
         aliases: dict[str, str] = {}
-        for row in range(self._table.rowCount()):
-            n = self._table.item(row, 0)
-            t = self._table.item(row, 1)
+        for row in range(self._alias_table.rowCount()):
+            n = self._alias_table.item(row, 0)
+            t = self._alias_table.item(row, 1)
             if n and t and n.text().strip() and t.text().strip():
                 aliases[n.text().strip()] = t.text().strip()
         self._config.set("app_aliases", aliases)
         self._config.save()
-        self._show_saved(self._save_lbl)
+        self._show_saved(self._save_lbl_alias)
 
-
-# ── Tab: Search Directories ────────────────────────────────────────────────────
-
-class DirsTab(_SettingsPanel):
-    def __init__(self, config: Config, parent=None):
-        super().__init__(config, parent)
-        self._build()
-
-    def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(10)
-
-        root.addWidget(_section("Search Directories"))
-        root.addWidget(_note(
-            "The assistant searches these directories when you ask it to find a file. "
-            "~ is expanded to your home directory."
-        ))
-
-        self._lst = QListWidget()
-        root.addWidget(self._lst, 1)
-
-        btn_row = QHBoxLayout()
-        self._btn_add = QPushButton("Add Directory…")
-        self._btn_del = QPushButton("Remove Selected")
-        self._btn_del.setObjectName("danger")
-        self._btn_def = QPushButton("Restore Defaults")
-        btn_row.addWidget(self._btn_add)
-        btn_row.addWidget(self._btn_del)
-        btn_row.addWidget(self._btn_def)
-        btn_row.addStretch()
-        root.addLayout(btn_row)
-
-        save_row, self._save_lbl, btn_save = self._save_row()
-        root.addLayout(save_row)
-
-        self._btn_add.clicked.connect(self._add_dir)
-        self._btn_del.clicked.connect(self._del_dir)
-        self._btn_def.clicked.connect(self._restore_defaults)
-        btn_save.clicked.connect(self._save)
-        self._load()
-
-    def _load(self) -> None:
-        self._lst.clear()
+    def _load_dirs(self) -> None:
+        self._dirs_list.clear()
         for d in self._config.get("search_dirs", []):
-            self._lst.addItem(str(d))
+            self._dirs_list.addItem(str(d))
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._load()
-
-    def _add_dir(self) -> None:
+    def _dirs_add(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select Directory")
         if path:
-            self._lst.addItem(path)
+            self._dirs_list.addItem(path)
 
-    def _del_dir(self) -> None:
-        for item in self._lst.selectedItems():
-            self._lst.takeItem(self._lst.row(item))
+    def _dirs_del(self) -> None:
+        for item in self._dirs_list.selectedItems():
+            self._dirs_list.takeItem(self._dirs_list.row(item))
 
-    def _restore_defaults(self) -> None:
-        self._lst.clear()
+    def _dirs_restore_defaults(self) -> None:
+        self._dirs_list.clear()
         from utils.config import DEFAULT_CONFIG
         for d in DEFAULT_CONFIG.get("search_dirs", []):
-            self._lst.addItem(d)
+            self._dirs_list.addItem(d)
 
-    def _save(self) -> None:
-        dirs = [self._lst.item(i).text() for i in range(self._lst.count())]
+    def _save_directories(self) -> None:
+        dirs = [self._dirs_list.item(i).text() for i in range(self._dirs_list.count())]
         self._config.set("search_dirs", dirs)
         self._config.save()
-        self._show_saved(self._save_lbl)
+        self._show_saved(self._save_lbl_dirs)
 
 
-# ── Tab: History ───────────────────────────────────────────────────────────────
+# ── Page: History ──────────────────────────────────────────────────────────────
 
 class HistoryTab(QWidget):
     def __init__(self, app_state, parent=None):
@@ -1627,7 +1708,6 @@ class HistoryTab(QWidget):
         rx = entry.get("response",  "")
         ax = entry.get("action",    "")
 
-        # Timestamp row with a subtle divider
         self._log.append(
             f'<span style="color:{theme.GHOST}; font-size:11px;">&#8212;&#8212;&#8212;&#8212;&#8212;</span>'
             f'&nbsp;<span style="color:{theme.MUTED}; font-size:10px; letter-spacing:0.4px;">'
@@ -1659,7 +1739,7 @@ class HistoryTab(QWidget):
         sb.setValue(sb.maximum())
 
 
-# ── Tab: Diagnostics ──────────────────────────────────────────────────────────
+# ── Page: Diagnostics ─────────────────────────────────────────────────────────
 
 class DiagnosticsTab(QWidget):
     def __init__(self, app_state, validate_cb: Callable | None = None, parent=None):
@@ -1744,67 +1824,157 @@ class DiagnosticsTab(QWidget):
             self._state.add_diagnostic("info", "Validation callback not connected.")
 
 
+# ── Navigation rail ────────────────────────────────────────────────────────────
+
+class NavRail(QWidget):
+    """Left sidebar navigation rail.
+
+    Emits ``section_changed(int)`` when the user selects a different page.
+    Call ``select(index)`` to programmatically switch sections.
+    """
+
+    section_changed = pyqtSignal(int)
+
+    _ITEMS = [
+        ("Dashboard",   "OVERVIEW"),
+        ("Audio",       "DEVICES"),
+        ("Settings",    "CONFIG"),
+        ("History",     "SESSION"),
+        ("Diagnostics", "SYSTEM"),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("nav_rail")
+        self.setFixedWidth(160)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 16)
+        root.setSpacing(0)
+
+        # App wordmark
+        app_hdr = QLabel("VOX")
+        app_hdr.setStyleSheet(
+            f"color: {theme.ACCENT_SOFT}; font-size: 13px; font-weight: 700; "
+            f"letter-spacing: 3.5px; padding: 20px 20px 16px 20px; "
+            f"background: transparent; border-bottom: 1px solid {_BORDER};"
+        )
+        root.addWidget(app_hdr)
+        root.addSpacing(4)
+
+        self._btn_group = QButtonGroup(self)
+        self._btn_group.setExclusive(True)
+        self._buttons: list[QPushButton] = []
+
+        for i, (name, _sub) in enumerate(self._ITEMS):
+            btn = QPushButton(name)
+            btn.setObjectName("nav_btn")
+            btn.setCheckable(True)
+            self._btn_group.addButton(btn, i)
+            root.addWidget(btn)
+            self._buttons.append(btn)
+
+        root.addStretch()
+
+        self._btn_group.idClicked.connect(self.section_changed)
+        self._buttons[0].setChecked(True)
+
+    def select(self, index: int) -> None:
+        """Programmatically select a nav item by zero-based index."""
+        if 0 <= index < len(self._buttons):
+            self._buttons[index].setChecked(True)
+
+
 # ── ControlCenter ──────────────────────────────────────────────────────────────
 
 class ControlCenter(QMainWindow):
     restart_listener_requested = pyqtSignal()
     rerun_validation_requested = pyqtSignal()
-    language_changed           = pyqtSignal(str)   # emitted when language config changes
+    language_changed           = pyqtSignal(str)
+
+    _SECTION_NAMES = ["Dashboard", "Audio", "Settings", "History", "Diagnostics"]
 
     def __init__(self, config: Config, app_state, speaker,
                  stt_cb: Callable | None = None, executor=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("VOX — Control Center")
-        self.setMinimumSize(760, 580)
-        self.resize(900, 640)
+        self.setMinimumSize(800, 580)
+        self.resize(980, 660)
         self.setStyleSheet(_CC_STYLE)
 
         icon_path = os.path.join(_project_root(), "assets", "icon.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
-        tabs = QTabWidget()
-        tabs.setDocumentMode(True)
-        tabs.setTabPosition(QTabWidget.TabPosition.North)
-
         reload_cb = executor.reload_config if executor is not None else None
 
-        tabs.addTab(DashboardTab(app_state, config),                              "Dashboard")
-        tabs.addTab(AudioTab(config, app_state, speaker,
-                             restart_cb=self.restart_listener_requested.emit,
-                             stt_cb=stt_cb),                                      "Audio")
-        tabs.addTab(ActivationTab(config, restart_cb=self.restart_listener_requested.emit), "Activation")
-        tabs.addTab(AssistantTab(config, speaker=speaker,
-                                 language_changed_cb=self.language_changed.emit), "Assistant")
-        tabs.addTab(ActionsTab(config, reload_cb=reload_cb),                       "Actions")
-        tabs.addTab(AliasesTab(config),                                            "Aliases")
-        tabs.addTab(DirsTab(config),                                               "Directories")
-        tabs.addTab(HistoryTab(app_state),                                         "History")
-        tabs.addTab(DiagnosticsTab(app_state,
-                                    validate_cb=self.rerun_validation_requested.emit), "Diagnostics")
+        # ── Pages ─────────────────────────────────────────────────────────────
+        self._dashboard   = DashboardTab(app_state, config)
+        self._audio       = AudioTab(
+            config, app_state, speaker,
+            restart_cb=self.restart_listener_requested.emit,
+            stt_cb=stt_cb,
+        )
+        self._settings    = SettingsPage(
+            config, speaker=speaker, app_state=app_state,
+            restart_cb=self.restart_listener_requested.emit,
+            reload_cb=reload_cb,
+            language_changed_cb=self.language_changed.emit,
+        )
+        self._history     = HistoryTab(app_state)
+        self._diagnostics = DiagnosticsTab(
+            app_state, validate_cb=self.rerun_validation_requested.emit,
+        )
 
-        self._tabs = tabs
-        self.setCentralWidget(tabs)
+        # ── Stacked content area ──────────────────────────────────────────────
+        self._stack = QStackedWidget()
+        for page in (self._dashboard, self._audio, self._settings,
+                     self._history, self._diagnostics):
+            self._stack.addWidget(page)
 
-    def show_tab(self, tab_name: str) -> None:
-        """Show the Control Center with the named tab focused.
+        # ── Navigation rail ───────────────────────────────────────────────────
+        self._nav = NavRail()
+        self._nav.section_changed.connect(self._stack.setCurrentIndex)
 
-        Called from the tray 'Settings' action to route directly to a
-        relevant section without opening a separate settings surface.
+        # ── Shell ─────────────────────────────────────────────────────────────
+        shell = QWidget()
+        layout = QHBoxLayout(shell)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._nav)
+        layout.addWidget(self._stack, 1)
+        self.setCentralWidget(shell)
+
+    def show_section(self, name: str) -> None:
+        """Show the Control Center with the named section active.
+
+        Valid names: Dashboard, Audio, Settings, History, Diagnostics.
         """
-        for i in range(self._tabs.count()):
-            if self._tabs.tabText(i) == tab_name:
-                self._tabs.setCurrentIndex(i)
-                break
+        try:
+            idx = self._SECTION_NAMES.index(name)
+        except ValueError:
+            idx = 0
+        self._nav.select(idx)
+        self._stack.setCurrentIndex(idx)
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def show_tab(self, tab_name: str) -> None:
+        """Backward-compatible alias — maps legacy tab names to sections."""
+        _legacy = {
+            "Activation":  "Settings",
+            "Assistant":   "Settings",
+            "Actions":     "Settings",
+            "Aliases":     "Settings",
+            "Directories": "Settings",
+        }
+        self.show_section(_legacy.get(tab_name, tab_name))
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
 
 def _project_root() -> str:
-    # src/ui/control_center.py → src/ui → src → project root
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -1819,8 +1989,7 @@ def _esc(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _mono_font():
-    from PyQt6.QtGui import QFont
+def _mono_font() -> QFont:
     f = QFont("Consolas")
     f.setPointSize(11)
     if not f.exactMatch():

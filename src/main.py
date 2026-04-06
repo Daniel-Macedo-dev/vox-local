@@ -279,7 +279,7 @@ def run_app(config: Config, whisper_model):
             menu.addAction("Control Center", self.control_center.show)
             menu.addAction("Show Overlay",   self.overlay.show)
             menu.addSeparator()
-            menu.addAction("Settings",       lambda: self.control_center.show_tab("Activation"))
+            menu.addAction("Settings",       lambda: self.control_center.show_section("Settings"))
             menu.addSeparator()
             menu.addAction("Quit",           self.app.quit)
 
