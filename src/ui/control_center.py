@@ -43,6 +43,10 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QSize
 from PyQt6.QtGui import QIcon, QFont
 
 from utils.config import Config
+from utils.audio_devices import (
+    enumerate_devices, filter_inputs, filter_outputs,
+    resolve_input, resolve_output, AudioDevice,
+)
 from ui.mic_meter import MicLevelBar
 from ui import theme
 
@@ -606,14 +610,18 @@ class DashboardTab(QWidget):
             self._lbl_mode.setText(f'Wake Word  ("{ww}")')
 
         try:
-            devices   = sd.query_devices()
-            mic_idx   = c.get("mic_device",    None)
-            out_idx   = c.get("output_device", None)
-            def_in, def_out = sd.default.device
-            mic_name = devices[mic_idx]["name"] if mic_idx is not None and mic_idx < len(devices) \
-                       else f'{devices[def_in]["name"]} (default)'
-            out_name = devices[out_idx]["name"] if out_idx is not None and out_idx < len(devices) \
-                       else f'{devices[def_out]["name"]} (default)'
+            mic_res  = resolve_input(c)
+            out_res  = resolve_output(c)
+            mic_name = mic_res.device_name
+            out_name = out_res.device_name
+            if mic_res.status == "system_default":
+                mic_name = f"{mic_name} (Default)"
+            elif mic_res.status in ("missing", "wrong_direction"):
+                mic_name = f"{mic_name} — fallback to Default"
+            if out_res.status == "system_default":
+                out_name = f"{out_name} (Default)"
+            elif out_res.status in ("missing", "wrong_direction"):
+                out_name = f"{out_name} — fallback to Default"
         except Exception:
             mic_name = out_name = "Unknown"
 
@@ -703,14 +711,26 @@ class AudioTab(_SettingsPanel):
         g.addWidget(_section("Input (Microphone)"), 0, 0)
         self._combo_in = QComboBox()
         g.addWidget(self._combo_in, 0, 1)
+        self._lbl_mic_status = QLabel("")
+        self._lbl_mic_status.setWordWrap(True)
+        self._lbl_mic_status.setStyleSheet(f"font-size: 11px; color: {_MUTED}; padding-left: 2px;")
+        g.addWidget(self._lbl_mic_status, 1, 0, 1, 2)
 
-        g.addWidget(_section("Output (Speakers)"), 1, 0)
+        g.addWidget(_section("Output (Speakers)"), 2, 0)
         self._combo_out = QComboBox()
-        g.addWidget(self._combo_out, 1, 1)
+        g.addWidget(self._combo_out, 2, 1)
+        self._lbl_out_status = QLabel("")
+        self._lbl_out_status.setWordWrap(True)
+        self._lbl_out_status.setStyleSheet(f"font-size: 11px; color: {_MUTED}; padding-left: 2px;")
+        g.addWidget(self._lbl_out_status, 3, 0, 1, 2)
 
         root.addWidget(grp_dev)
-        root.addWidget(_note("Changing microphone restarts the listener immediately. "
-                             "Output changes take effect on next TTS call."))
+        root.addWidget(_note(
+            "Microphone changes restart the listener automatically when saved. "
+            "Output device changes take effect on the next TTS call. "
+            "Selections are saved by device name and remain stable even when "
+            "PortAudio indices change after a reboot."
+        ))
 
         # ── Level meter ────────────────────────────────────────────────────────
         grp_lvl = QGroupBox("Microphone Level")
@@ -842,57 +862,123 @@ class AudioTab(_SettingsPanel):
         self._calib_status.setStyleSheet(f"color: {_WARNING}; font-size: 11px;")
 
     def _populate_devices(self) -> None:
+        """Refresh device combos using the shared resolver.
+
+        Each item's data is an AudioDevice object (or None for System Default).
+        Labels are clean (no raw index prefix) and disambiguated by host API
+        when multiple devices share the same name.
+        """
         self._combo_in.clear()
         self._combo_out.clear()
-        self._combo_in.addItem("System Default", None)
-        self._combo_out.addItem("System Default", None)
+        self._combo_in.addItem("System Default  \u2605 OS Choice", None)
+        self._combo_out.addItem("System Default  \u2605 OS Choice", None)
         try:
-            devices = sd.query_devices()
-            for i, d in enumerate(devices):
-                try:
-                    host = f" [{sd.query_hostapis(d['hostapi'])['name']}]"
-                except Exception:
-                    host = ""
-                label = f"[{i}] {d['name']}{host}"
-                if d["max_input_channels"] > 0:
-                    self._combo_in.addItem(label, i)
-                if d["max_output_channels"] > 0:
-                    self._combo_out.addItem(label, i)
+            devices = enumerate_devices()
+            for dev in filter_inputs(devices):
+                self._combo_in.addItem(dev.display_label, dev)
+            for dev in filter_outputs(devices):
+                self._combo_out.addItem(dev.display_label, dev)
         except Exception:
             pass
-        self._select_combo(self._combo_in,  self._config.get("mic_device",    None))
-        self._select_combo(self._combo_out, self._config.get("output_device", None))
+        self._restore_input_selection()
+        self._restore_output_selection()
 
-    def _select_combo(self, combo: QComboBox, value) -> None:
-        for i in range(combo.count()):
-            if combo.itemData(i) == value:
-                combo.setCurrentIndex(i)
-                return
+    def _restore_input_selection(self) -> None:
+        try:
+            result = resolve_input(self._config)
+            self._apply_resolution_to_combo(self._combo_in, result, self._lbl_mic_status)
+        except Exception:
+            self._combo_in.setCurrentIndex(0)
+            self._lbl_mic_status.setText("")
+
+    def _restore_output_selection(self) -> None:
+        try:
+            result = resolve_output(self._config)
+            self._apply_resolution_to_combo(self._combo_out, result, self._lbl_out_status)
+        except Exception:
+            self._combo_out.setCurrentIndex(0)
+            self._lbl_out_status.setText("")
+
+    def _apply_resolution_to_combo(
+        self,
+        combo: QComboBox,
+        result,
+        status_lbl: QLabel,
+    ) -> None:
+        """Select the correct combo item and show a truthful resolution status label."""
+        if result.device_index is None:
+            combo.setCurrentIndex(0)
+        else:
+            found = False
+            for i in range(1, combo.count()):
+                dev = combo.itemData(i)
+                if dev is not None and dev.index == result.device_index:
+                    combo.setCurrentIndex(i)
+                    found = True
+                    break
+            if not found:
+                combo.setCurrentIndex(0)
+
+        _styles = {
+            "system_default":  (_MUTED,   ""),
+            "resolved":        (_SUCCESS,  "Saved device found and active."),
+            "legacy_int":      (_WARNING,  "Legacy index-based selection — save to enable stable matching."),
+            "missing":         (_ERROR,    "Saved device not found — using System Default."),
+            "wrong_direction": (_ERROR,    "Saved device has wrong direction — using System Default."),
+        }
+        color, text = _styles.get(result.status, (_MUTED, ""))
+        if text:
+            status_lbl.setText(text)
+            status_lbl.setStyleSheet(f"font-size: 11px; color: {color}; padding-left: 2px;")
+        else:
+            status_lbl.setText("")
+            status_lbl.setStyleSheet(f"font-size: 11px; color: {_MUTED}; padding-left: 2px;")
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._populate_devices()
 
     def _save(self) -> None:
-        old_mic = self._config.get("mic_device", None)
-        new_mic = self._combo_in.currentData()
-        new_out = self._combo_out.currentData()
-        self._config.set("mic_device",    new_mic)
-        self._config.set("output_device", new_out)
+        old_mic_idx = self._config.get("mic_device",          None)
+        old_mic_sel = self._config.get("mic_device_selector", None)
+
+        mic_dev = self._combo_in.currentData()   # AudioDevice | None
+        out_dev = self._combo_out.currentData()  # AudioDevice | None
+
+        new_mic_idx = mic_dev.index        if mic_dev is not None else None
+        new_out_idx = out_dev.index        if out_dev is not None else None
+        new_mic_sel = mic_dev.identity_key if mic_dev is not None else None
+        new_out_sel = out_dev.identity_key if out_dev is not None else None
+
+        self._config.set("mic_device",             new_mic_idx)
+        self._config.set("mic_device_selector",    new_mic_sel)
+        self._config.set("output_device",          new_out_idx)
+        self._config.set("output_device_selector", new_out_sel)
         self._config.save()
         if self._speaker:
             self._speaker.reload_config()
+
+        # Prefer comparing by stable selector; fall back to index comparison
+        if old_mic_sel is not None or new_mic_sel is not None:
+            mic_changed = (new_mic_sel != old_mic_sel)
+        else:
+            mic_changed = (new_mic_idx != old_mic_idx)
+
         msg = "Saved."
-        if new_mic != old_mic and self._restart_cb:
+        if mic_changed and self._restart_cb:
             self._restart_cb()
             msg = "Saved. Listener restarting…"
             self._state.add_diagnostic("info", "Microphone device changed — listener restarted.")
         self._show_saved(self._save_lbl, True, msg)
+        # Refresh resolution status labels to reflect the new saved state
+        self._restore_input_selection()
+        self._restore_output_selection()
 
     def _test_mic(self) -> None:
         self._test_lbl.setText("Recording for 3 s…")
         self._test_lbl.setStyleSheet(f"color: {_WARNING}; font-size: 11px;")
-        mic_idx = self._combo_in.currentData()
+        _dev = self._combo_in.currentData()
+        mic_idx = _dev.index if _dev is not None else None
 
         def _record() -> None:
             try:
@@ -941,7 +1027,8 @@ class AudioTab(_SettingsPanel):
         self._calib_result.setText("")
         self._calib_status.setText("Phase 1/2 — Stay silent for 3 seconds…")
         self._calib_status.setStyleSheet(f"color: {_WARNING}; font-size: 11px;")
-        mic_idx = self._combo_in.currentData()
+        _calib_dev = self._combo_in.currentData()
+        mic_idx = _calib_dev.index if _calib_dev is not None else None
 
         def _run() -> None:
             try:
@@ -1061,8 +1148,9 @@ class AudioTab(_SettingsPanel):
         self._btn_stt.setEnabled(False)
         self._stt_result.setText("Recording for 5 s — speak now…")
         self._stt_result.setStyleSheet(f"color: {_WARNING}; font-size: 11px;")
-        mic_idx = self._combo_in.currentData()
-        stt_cb  = self._stt_cb
+        _stt_dev = self._combo_in.currentData()
+        mic_idx  = _stt_dev.index if _stt_dev is not None else None
+        stt_cb   = self._stt_cb
 
         def _run() -> None:
             try:

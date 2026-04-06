@@ -10,6 +10,7 @@ from faster_whisper import WhisperModel
 
 from utils.config import Config
 from utils.logger import get_logger
+from utils.audio_devices import resolve_input, enumerate_devices, filter_inputs
 from audio_utils import (
     wake_word_in_text,
     extract_post_wake,
@@ -115,15 +116,20 @@ class Listener(QThread):
             self._run_wake_word_loop()
 
     def _validate_mic_device(self):
-        mic_device = self.config.get("mic_device", None)
         try:
-            info = sd.query_devices(mic_device, "input") if mic_device is not None else sd.query_devices(sd.default.device[0])
-            if info["max_input_channels"] == 0:
-                log.error(f"mic_device {mic_device} ({info['name']}) has NO input channels — it is an output device! Fix mic_device in settings.yaml.")
-            else:
-                log.info(f"Using mic: [{mic_device}] {info['name']} ({info['max_input_channels']}ch)")
+            result = resolve_input(self.config)
+            if result.status == "wrong_direction":
+                log.error(f"Microphone config error: {result.message}")
+            elif result.status == "missing":
+                log.warning(f"Microphone: {result.message}")
+            elif result.status == "legacy_int":
+                log.info(f"Microphone (legacy index): {result.message}")
+            elif result.status == "resolved":
+                log.info(f"Microphone resolved: '{result.device_name}' (index {result.device_index})")
+            else:  # system_default
+                log.info(f"Microphone: system default — '{result.device_name}'")
         except Exception as e:
-            log.warning(f"Could not validate mic_device {mic_device}: {e}")
+            log.warning(f"Could not validate mic_device: {e}")
 
     # ── Device helpers ────────────────────────────────────────────────────────
 
@@ -154,7 +160,12 @@ class Listener(QThread):
         _empty_count  = 0
 
         while not self._stop_flag.is_set():
-            mic_device      = self.config.get("mic_device", None)
+            _mic_result     = resolve_input(self.config)
+            mic_device      = _mic_result.device_index
+            if _mic_result.status == "wrong_direction":
+                log.error(f"Microphone config error: {_mic_result.message}")
+            elif _mic_result.status == "missing":
+                log.warning(f"Microphone: {_mic_result.message}")
             wake_word       = self.config.get("wake_word", "vox").lower().strip()
             channels        = self._get_device_channels(mic_device)
             read_samples    = int(self.SAMPLE_RATE * self._READ_CHUNK_S)
@@ -359,7 +370,12 @@ class Listener(QThread):
 
         while not self._stop_flag.is_set():
             try:
-                mic_device       = self.config.get("mic_device", None)
+                _mic_result      = resolve_input(self.config)
+                mic_device       = _mic_result.device_index
+                if _mic_result.status == "wrong_direction":
+                    log.error(f"Microphone config error: {_mic_result.message}")
+                elif _mic_result.status == "missing":
+                    log.warning(f"Microphone: {_mic_result.message}")
                 ptt_key          = self.config.get("push_to_talk_key", "ctrl+shift")
                 silence_duration = float(self.config.get("silence_duration", 2.0))
                 silence_samples  = int(self.SAMPLE_RATE * silence_duration)
@@ -528,17 +544,23 @@ class Listener(QThread):
     # ── Device listing ────────────────────────────────────────────────────────
 
     def _print_devices(self):
-        devices    = sd.query_devices()
-        default_in = sd.default.device[0]
-        configured = self.config.get("mic_device", None)
-        log.info("Available microphones:")
-        for i, d in enumerate(devices):
-            if d["max_input_channels"] > 0:
-                if configured is not None and i == configured:
-                    marker = "→ USING"
-                elif configured is None and i == default_in:
-                    marker = "→ DEFAULT"
+        try:
+            all_devs  = enumerate_devices()
+            inputs    = filter_inputs(all_devs)
+            mic_result = resolve_input(self.config)
+            log.info("Available microphones:")
+            for d in inputs:
+                if d.index == mic_result.device_index:
+                    marker = "→ ACTIVE  "
+                elif d.is_default_input and mic_result.device_index is None:
+                    marker = "→ DEFAULT "
                 else:
-                    marker = "  "
-                log.info(f"  [{i:2d}] {marker}  {d['name']}")
-        log.info("To change mic, set 'mic_device: <index>' in settings.yaml")
+                    marker = "          "
+                log.info(f"  [{d.index:2d}] {marker}  {d.display_label}")
+            if mic_result.status in ("wrong_direction", "missing"):
+                log.warning(f"  Microphone resolution: {mic_result.message}")
+            elif mic_result.status == "system_default":
+                log.info(f"  Using system default microphone: '{mic_result.device_name}'")
+            log.info("To change mic, open the Audio tab in the Control Center and save.")
+        except Exception as e:
+            log.warning(f"Could not enumerate audio devices: {e}")

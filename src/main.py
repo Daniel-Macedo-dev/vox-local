@@ -62,17 +62,22 @@ def _validate_startup(config: Config, app_state=None):
     else:
         _info(f"Voice model found: {os.path.basename(voice_path)}")
 
-    # 4. Audio device indices
+    # 4. Audio devices — use resolver for truthful, direction-aware validation
     try:
-        import sounddevice as sd
-        devices = sd.query_devices()
-        n = len(devices)
-        mic_idx = config.get("mic_device",    None)
-        out_idx = config.get("output_device", None)
-        if mic_idx is not None and (not isinstance(mic_idx, int) or mic_idx >= n):
-            _warn(f"mic_device={mic_idx} is not a valid device index. Using system default.")
-        if out_idx is not None and (not isinstance(out_idx, int) or out_idx >= n):
-            _warn(f"output_device={out_idx} is not a valid device index. Using system default.")
+        from utils.audio_devices import resolve_input, resolve_output
+        for _resolver, _label in ((resolve_input, "Microphone"), (resolve_output, "Output device")):
+            _res = _resolver(config)
+            if _res.status == "system_default":
+                _info(f"{_label}: system default — '{_res.device_name}'")
+            elif _res.status == "resolved":
+                _info(f"{_label}: '{_res.device_name}' (index {_res.device_index}, saved selector)")
+            elif _res.status == "legacy_int":
+                _info(f"{_label}: '{_res.device_name}' (index {_res.device_index}, legacy int config)")
+                _info(f"  Open the Audio tab and save to upgrade to stable device matching.")
+            elif _res.status == "missing":
+                _warn(f"{_label}: saved device not found — using system default. {_res.message}")
+            elif _res.status == "wrong_direction":
+                _warn(f"{_label}: {_res.message}")
     except Exception as e:
         _warn(f"Could not validate audio devices: {e}")
 

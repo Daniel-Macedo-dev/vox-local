@@ -30,8 +30,15 @@ DEFAULT_CONFIG = {
     "voice_model":  "voices/en_US-ryan-high.onnx",
 
     # ── Audio devices ────────────────────────────────────────────────────────
-    "mic_device":    None,
-    "output_device": None,
+    # Legacy integer indices — kept for backward compatibility with existing configs.
+    # Prefer mic_device_selector / output_device_selector for new saves (stable
+    # across reboots even when PortAudio reassigns indices).
+    "mic_device":             None,
+    "output_device":          None,
+    # Stable selectors — set automatically when saving from the Audio tab.
+    # Format: "<raw device name>::<host_api_index>"
+    "mic_device_selector":    None,
+    "output_device_selector": None,
 
     # ── Executor ─────────────────────────────────────────────────────────────
     "search_dirs": [

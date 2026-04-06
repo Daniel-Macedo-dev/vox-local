@@ -10,6 +10,7 @@ import sounddevice as sd
 
 from utils.config import Config
 from utils.logger import get_logger
+from utils.audio_devices import resolve_output
 
 log = get_logger("Speaker")
 
@@ -69,7 +70,12 @@ class Speaker:
         # This means changes made in the Assistant tab take effect immediately.
         piper_path    = self._resolve_path(self.config.get("piper_path",  "piper/piper/piper.exe"))
         voice_model   = self._resolve_path(self.config.get("voice_model", "en_US-ryan-high.onnx"))
-        output_device = self.config.get("output_device", None)
+        _out_result   = resolve_output(self.config)
+        output_device = _out_result.device_index
+        if _out_result.status == "wrong_direction":
+            log.warning(f"output_device config: {_out_result.message}")
+        elif _out_result.status == "missing":
+            log.warning(f"Output device: {_out_result.message}")
 
         try:
             with self._lock:

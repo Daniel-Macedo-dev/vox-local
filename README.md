@@ -157,7 +157,7 @@ VOX has two UI surfaces:
 |--------|-----|
 | Open Control Center | Double-click tray icon, or right-click → Control Center |
 | Show Overlay | Right-click → Show Overlay |
-| Open Control Center (Activation tab) | Right-click → Settings |
+| Open Settings | Right-click → Settings |
 
 ### Voice interaction
 
@@ -168,19 +168,15 @@ VOX has two UI surfaces:
 | Switch language | Click the `AUTO`/`PT`/`EN` badge in the overlay |
 | Move the overlay | Click and drag |
 
-### Control Center tabs
+### Control Center pages
 
-| Tab | What you can do |
-|-----|-----------------|
+| Page | What you can do |
+|------|-----------------|
 | **Dashboard** | See runtime state, dependency health, active config, last interaction |
-| **Audio** | Select mic/output devices, view live mic level, test mic (3 s recording), test TTS |
-| **Activation** | Set activation mode, wake word, PTT key, silence/chunk parameters |
-| **Assistant** | Set Ollama URL, model, history size, language, TTS on/off, voice model |
-| **Actions** | Enable/disable individual actions in the allowlist |
-| **Aliases** | Add, edit, or remove spoken name → app/URI mappings |
-| **Directories** | Manage directories searched by `search_file` |
+| **Audio** | Select mic/output devices, view live mic level, test mic (3 s recording), calibrate, run STT test |
+| **Settings** | Activation mode, wake word, PTT key, Ollama URL/model, language, TTS, voice, permissions, aliases, directories |
 | **History** | View recent transcript/response/action entries; clear session history |
-| **Diagnostics** | View structured warning/error log; re-run validation; clear log |
+| **Diagnostics** | View structured warning/error log; re-run startup validation; clear log |
 
 ### Example commands
 
@@ -260,6 +256,8 @@ Overlay HUD + Control Center — show transcript, response, history, diagnostics
 
 **Most settings can be changed from the Control Center** and are saved automatically. Direct YAML editing is only needed for advanced settings not exposed in the UI (`whisper_model`, `whisper_device`, `whisper_compute_type`).
 
+Audio device selections are saved from the **Audio** page and persist stably across reboots even when PortAudio reassigns device indices. Existing configs that contain raw integer `mic_device` / `output_device` values continue to work — they are resolved to the matching device in the current list, with a clear diagnostic message if the device is no longer available.
+
 | Key | Default | Description |
 |-----|---------|-------------|
 | `activation_mode` | `wake_word` | `wake_word` or `push_to_talk` |
@@ -274,8 +272,10 @@ Overlay HUD + Control Center — show transcript, response, history, diagnostics
 | `tts_enabled` | `true` | Enable/disable voice responses |
 | `piper_path` | `piper/piper/piper.exe` | Path to Piper binary (relative to project root) |
 | `voice_model` | `voices/en_US-ryan-high.onnx` | Piper voice (.onnx, relative to project root) |
-| `mic_device` | `null` | Microphone device index (`null` = system default) |
-| `output_device` | `null` | Speaker device index (`null` = system default) |
+| `mic_device` | `null` | Microphone: `null` = system default. When saved from the UI a stable selector is also written; legacy integer values in existing configs continue to work. |
+| `output_device` | `null` | Speaker: same as above. |
+| `mic_device_selector` | `null` | Stable selector written automatically by the Audio tab. Format: `"Device Name::host_api_index"`. Takes priority over `mic_device` on resolution. |
+| `output_device_selector` | `null` | Stable selector for the output device (same format). |
 | `max_history` | `20` | Max conversation turns kept in memory |
 | `silence_threshold` | `0.01` | RMS below which audio is silent |
 | `silence_duration` | `1.5` | Seconds of silence that ends a command |
@@ -290,7 +290,7 @@ Overlay HUD + Control Center — show transcript, response, history, diagnostics
 - `ollama_model`, `ollama_url` — next LLM request
 - `allowed_actions` — next LLM call (both the prompt and executor allowlist update together)
 - `silence_threshold`, `silence_duration` — next command capture cycle
-- Audio devices — output: immediate; microphone: listener restarts automatically
+- Audio devices — output device: takes effect on next TTS call; microphone: listener restarts automatically when saved from the Audio page
 
 ### Settings that restart the listener automatically (on Save in the UI)
 
